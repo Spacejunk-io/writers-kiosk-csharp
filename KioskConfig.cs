@@ -18,6 +18,10 @@ public sealed class KioskConfig
     public string AzureEndpoint { get; private init; } = "";
     public string AzureDeployment { get; private init; } = "";
     public string AzureApiVersion { get; private init; } = "2024-06-01";
+    /// <summary>True = keyless Entra ID sign-in ("Rung 3"); false = api-key header.</summary>
+    public bool AzureUseEntra { get; private init; }
+    public string? AzureTenantId { get; private init; }
+    public string? AzureClientId { get; private init; }
 
     public int CameraIndex { get; private init; }
     public string? SumatraPath { get; private init; }
@@ -76,14 +80,29 @@ public sealed class KioskConfig
         }
         catch { }
 
+        // Azure auth style: an explicit AZURE_AUTH wins; otherwise keyless
+        // Entra sign-in whenever no API key is configured.
+        var azureKey = Get("AZURE_OPENAI_API_KEY");
+        var azureUseEntra = provider == Provider.Azure && Get("AZURE_AUTH").ToLowerInvariant() switch
+        {
+            "entra" or "keyless" => true,
+            "key" => false,
+            _ => azureKey.Length == 0 || azureKey.Contains("REPLACE_ME"),
+        };
+        if (provider == Provider.Azure && !azureUseEntra)
+            azureKey = Require("AZURE_OPENAI_API_KEY");
+
         return new KioskConfig
         {
             Provider = provider,
-            ApiKey = provider == Provider.OpenAi ? Require("OPENAI_API_KEY") : Require("AZURE_OPENAI_API_KEY"),
+            ApiKey = provider == Provider.OpenAi ? Require("OPENAI_API_KEY") : azureKey,
             Model = Get("OPENAI_MODEL", "gpt-4o"),
             AzureEndpoint = provider == Provider.Azure ? Require("AZURE_OPENAI_ENDPOINT").TrimEnd('/') : "",
             AzureDeployment = provider == Provider.Azure ? Require("AZURE_OPENAI_DEPLOYMENT") : "",
             AzureApiVersion = Get("AZURE_OPENAI_API_VERSION", "2024-06-01"),
+            AzureUseEntra = azureUseEntra,
+            AzureTenantId = Get("AZURE_TENANT_ID") is { Length: > 0 } tid ? tid : null,
+            AzureClientId = Get("AZURE_CLIENT_ID") is { Length: > 0 } cid ? cid : null,
             CameraIndex = int.TryParse(Get("CAMERA_INDEX"), out var ci) ? ci : 0,
             SumatraPath = Get("SUMATRA_PATH") is { Length: > 0 } sp ? sp : null,
             PrinterName = Get("PRINTER_NAME") is { Length: > 0 } pn ? pn : null,

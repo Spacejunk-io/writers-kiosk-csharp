@@ -42,6 +42,22 @@ Forms app on .NET 10.
   performed before any praise is written; wrong claims land in the
   Accuracy Check, never the Praise.
 
+## Keyless district sign-in (Azure OpenAI + Entra ID)
+
+This edition can run with **no API key at all**. With
+`LLM_PROVIDER=azure` and no `AZURE_OPENAI_API_KEY` set, the first launch
+opens a browser sign-in with the teacher's district (Entra ID) account;
+tokens are cached in a Windows-DPAPI-encrypted store so every later
+launch is silent. Requests carry short-lived bearer tokens — no
+long-lived secret ever exists on disk, and IT controls access entirely
+through the account: granting the *Cognitive Services OpenAI User* role
+on the Azure OpenAI resource enables the kiosk, and disabling the
+account or removing the role revokes it, with every call attributable.
+Optional `.env` entries: `AZURE_TENANT_ID` pins the district tenant, and
+`AZURE_CLIENT_ID` supports tenants that require an IT-registered app.
+Setting `AZURE_OPENAI_API_KEY` (or `AZURE_AUTH=key`) uses the classic
+key header instead.
+
 ## Setup
 
 1. Install the [.NET 10 SDK](https://dotnet.microsoft.com/download)

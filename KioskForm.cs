@@ -13,6 +13,7 @@ public sealed class KioskForm : Form
     private const int MaxPages = 4;
 
     private readonly KioskConfig _cfg;
+    private readonly EntraTokenProvider? _entra;
     private readonly PictureBox _view = new() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black };
     private readonly Enhancer _enhancer;
     private readonly object _stateLock = new();
@@ -36,6 +37,8 @@ public sealed class KioskForm : Form
     public KioskForm(KioskConfig cfg)
     {
         _cfg = cfg;
+        if (cfg.Provider == Provider.Azure && cfg.AzureUseEntra)
+            _entra = new EntraTokenProvider(cfg.AzureTenantId, cfg.AzureClientId);
         _enhancer = new Enhancer(cfg.Enhance);
         _flipV = cfg.FlipVertical;
         _flipH = cfg.FlipHorizontal;
@@ -60,6 +63,15 @@ public sealed class KioskForm : Form
         base.OnShown(e);
         try
         {
+            // Warm up the district sign-in at launch, so the one-time
+            // browser prompt (first run only) never interrupts a class.
+            if (_entra is not null)
+            {
+                Console.WriteLine("[kiosk] Keyless Azure mode: verifying district sign-in…");
+                await _entra.GetTokenAsync();
+                Console.WriteLine("[kiosk] District sign-in OK — no API key in use.");
+            }
+
             _descriptors = new CaptureDevices().EnumerateDescriptors().ToArray();
             if (_descriptors.Count == 0)
                 throw new InvalidOperationException("No cameras detected. Is the document camera plugged in?");
@@ -308,7 +320,7 @@ public sealed class KioskForm : Form
             string? error = null;
             try
             {
-                var markdown = await LlmClient.GetFeedbackAsync(_cfg, pages);
+                var markdown = await LlmClient.GetFeedbackAsync(_cfg, pages, _entra);
                 pages.Clear(); // image bytes released before printing
                 notice = LlmClient.NoticeFor(markdown);
                 if (notice is null)

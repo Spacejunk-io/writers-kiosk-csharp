@@ -12,7 +12,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>writers-kiosk</AssemblyName>
     <ApplicationIcon>assets\icon.ico</ApplicationIcon>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <Company>Spacejunk-IO</Company>
     <Product>Writer's Kiosk</Product>
     <Authors>Spacejunk-io — George Bacon</Authors>
@@ -33,6 +33,8 @@
     <PackageReference Include="Markdig" Version="0.41.0" />
     <!-- .env loading (same semantics as the Rust dotenvy) -->
     <PackageReference Include="DotNetEnv" Version="3.1.1" />
+    <!-- Keyless Entra ID sign-in for Azure OpenAI (no API key on disk) -->
+    <PackageReference Include="Azure.Identity" Version="1.13.2" />
   </ItemGroup>
 
 </Project>

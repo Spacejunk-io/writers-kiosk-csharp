@@ -72,7 +72,8 @@ STYLE:
     /// Sends the captured page images (JPEG bytes, in memory only) to the
     /// configured vision model and returns the Markdown feedback.
     /// </summary>
-    public static async Task<string> GetFeedbackAsync(KioskConfig cfg, IReadOnlyList<byte[]> jpegs)
+    public static async Task<string> GetFeedbackAsync(
+        KioskConfig cfg, IReadOnlyList<byte[]> jpegs, EntraTokenProvider? entra = null)
     {
         var systemPrompt = SystemPrompt;
         if (cfg.AssignmentContext is { } ctx)
@@ -135,6 +136,8 @@ STYLE:
             request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
             if (cfg.Provider == Provider.OpenAi)
                 request.Headers.Authorization = new("Bearer", cfg.ApiKey);
+            else if (cfg.AzureUseEntra && entra is not null)
+                request.Headers.Authorization = new("Bearer", await entra.GetTokenAsync());
             else
                 request.Headers.Add("api-key", cfg.ApiKey);
 
@@ -167,7 +170,10 @@ STYLE:
             var detail = root.TryGetProperty("error", out var err) &&
                          err.TryGetProperty("message", out var msg)
                 ? msg.GetString() : "(no detail)";
-            throw new InvalidOperationException($"LLM API error {(int)response.StatusCode}: {detail}");
+            var hint = cfg.AzureUseEntra && (int)response.StatusCode is 401 or 403
+                ? " (Keyless mode: your district account may lack the \"Cognitive Services OpenAI User\" role on the Azure OpenAI resource — ask IT.)"
+                : "";
+            throw new InvalidOperationException($"LLM API error {(int)response.StatusCode}: {detail}{hint}");
         }
 
         // Surface token usage on the console so the teacher can track spend.
