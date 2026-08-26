@@ -82,10 +82,44 @@ public static class Subjects
 }
 
 /// <summary>
-/// Live, teacher-adjustable session state: school level, subject, and
-/// today's assignment context. Level/subject persist across restarts in
-/// a small non-secret JSON file; the assignment persists in
-/// assignment.txt as before.
+/// Response bands calibrate the feedback's language and expectations to
+/// the individual student a teacher knows — phrased respectfully and
+/// asset-based ("Emerging", never "significantly below").
+/// </summary>
+public static class Bands
+{
+    public static readonly (string Key, string Display)[] All =
+    [
+        ("emerging", "Emerging — building foundations"),
+        ("approaching", "Approaching grade level"),
+        ("on", "On grade level"),
+        ("exceeding", "Exceeding grade level"),
+        ("advanced", "Advanced — well beyond grade level"),
+    ];
+
+    public static string Display(string key) =>
+        All.FirstOrDefault(b => b.Key == key).Display ?? "On grade level";
+
+    public static string Guidance(string key) => key switch
+    {
+        "emerging" =>
+            "This student is building foundational writing skills. Use short, simple sentences and the most common words; explain one idea per sentence. Never use a subject term without a plain-word explanation in the same sentence. Be generous and specific in praising genuine effort and every correct element. Keep each feedback item to one or two sentences, and make each Polish step one small, concrete, immediately doable action. The goal is confidence plus one or two real improvements — never a wall of correction.",
+        "approaching" =>
+            "This student is working toward grade level. Use clear, friendly sentences on the simpler side of grade-level text, and briefly define subject terms when first used. Make Polish steps small and scaffolded — say exactly where in the work and how to try each one. Encourage generously and prioritize the improvements with the biggest payoff.",
+        "exceeding" =>
+            "This student is working above grade level. Use full academic vocabulary, hold the work to high standards, and let the Questions target nuance — counterarguments, precision of language, deeper connections across the subject. Praise should name what is sophisticated about the work, not merely what is correct.",
+        "advanced" =>
+            "This student is working well beyond grade level. Respond as to a young scholar: precise disciplinary vocabulary, exacting standards, Questions that probe subtleties an expert would raise, and Polish steps that push toward the conventions of the discipline itself (historiography, formal proof style, literary criticism, publication-quality lab writing). Do not inflate praise — earned, specific recognition only.",
+        _ =>
+            "This student is working at grade level. Use age-appropriate academic language and normal grade-level expectations.",
+    };
+}
+
+/// <summary>
+/// Live, teacher-adjustable session state: school level, subject, grade,
+/// response band, bilingual language, and today's assignment context.
+/// Everything except the assignment persists across restarts in a small
+/// non-secret JSON file; the assignment persists in assignment.txt.
 /// </summary>
 public sealed class SessionSettings
 {
@@ -93,11 +127,20 @@ public sealed class SessionSettings
 
     public string Level { get; set; } = Subjects.Middle;
     public string Subject { get; set; } = "Social Studies";
+    /// <summary>Specific grade, 6-12; kept consistent with Level.</summary>
+    public int Grade { get; set; } = 8;
+    /// <summary>Response band key from <see cref="Bands"/>.</summary>
+    public string Band { get; set; } = "on";
+    /// <summary>Home/partner language for bilingual feedback (ELL
+    /// support), or null for English-only. Independent of subject.</summary>
+    public string? BilingualLanguage { get; set; }
     public string? AssignmentContext { get; set; }
 
     public string LevelPhrase => Level == Subjects.High ? "high school" : "middle school";
     public string GradePhrase => Level == Subjects.High ? "high school (grades 9-12)" : "middle school (grades 6-8)";
     public string SubjectGuidance => Subjects.Guidance(Level, Subject);
+    public string BandDisplay => Bands.Display(Band);
+    public string BandGuidance => Bands.Guidance(Band);
 
     public static SessionSettings Load(KioskConfig cfg)
     {
@@ -116,6 +159,19 @@ public sealed class SessionSettings
                     settings.Level = level!;
                     settings.Subject = subject;
                 }
+                if (root.TryGetProperty("grade", out var g) &&
+                    g.TryGetInt32(out var grade) && grade is >= 6 and <= 12)
+                    settings.Grade = grade;
+                if (root.TryGetProperty("band", out var b) &&
+                    b.GetString() is { } band && Bands.All.Any(x => x.Key == band))
+                    settings.Band = band;
+                if (root.TryGetProperty("bilingual", out var bl) &&
+                    bl.GetString() is { Length: > 0 } lang)
+                    settings.BilingualLanguage = lang;
+                // Keep grade consistent with level after loading.
+                settings.Grade = settings.Level == Subjects.High
+                    ? Math.Clamp(settings.Grade, 9, 12)
+                    : Math.Clamp(settings.Grade, 6, 8);
             }
         }
         catch { /* corrupt UI file: fall back to defaults */ }
@@ -126,7 +182,14 @@ public sealed class SessionSettings
     {
         try
         {
-            File.WriteAllText(UiFile, JsonSerializer.Serialize(new { level = Level, subject = Subject }));
+            File.WriteAllText(UiFile, JsonSerializer.Serialize(new
+            {
+                level = Level,
+                subject = Subject,
+                grade = Grade,
+                band = Band,
+                bilingual = BilingualLanguage,
+            }));
         }
         catch { /* read-only folder: selection just won't persist */ }
     }

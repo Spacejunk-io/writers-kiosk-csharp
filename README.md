@@ -18,6 +18,18 @@ clicks, no saved images. Free software under the GPL-3.0-or-later.
   languages, technology/CTE, and more per level); the AI's persona,
   feedback emphases, accuracy checking, and refusal scope all shift to
   that subject and grade band instantly. The choice persists per machine.
+- **Grade & Band** — pick the specific grade (6–12; the school level
+  follows automatically) and a response band that calibrates the
+  feedback's reading level, question depth, and step size to the
+  individual student: *Emerging — building foundations · Approaching
+  grade level · On grade level · Exceeding grade level · Advanced*.
+- **Bilingual** — for multilingual learners in **any** subject: choose a
+  home language (Spanish, French, Arabic, Chinese, Haitian Creole,
+  Korean, Portuguese, Russian, Ukrainian, Vietnamese, or any other via
+  "Other Language…") and every feedback item appears in English first,
+  then that language, so the student *and their family* can read the
+  report fully. World Languages classes keep their automatic
+  target-language bilingual mode when this is off.
 - **Reports** — reprint the last report (also the **R** key; a printer
   jam never costs a second AI request), and open the **feedback log**:
   every report's text (never images, never names) is appended to

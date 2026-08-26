@@ -17,6 +17,15 @@ public sealed class KioskForm : Form
     private readonly SessionSettings _session;
     private ToolStripMenuItem _middleMenu = null!;
     private ToolStripMenuItem _highMenu = null!;
+    private ToolStripMenuItem _gradeBandMenu = null!;
+    private ToolStripMenuItem _bilingualMenu = null!;
+
+    private static readonly string[] BilingualLanguages =
+    [
+        "Spanish", "French", "Arabic", "Chinese (Simplified)",
+        "Haitian Creole", "Korean", "Portuguese", "Russian",
+        "Ukrainian", "Vietnamese",
+    ];
     private readonly PictureBox _view = new() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black };
     private readonly Enhancer _enhancer;
     private readonly object _stateLock = new();
@@ -67,7 +76,9 @@ public sealed class KioskForm : Form
         }
         if (cfg.AssignmentContext is not null)
             Console.WriteLine("[kiosk] Loaded teacher assignment context from assignment.txt.");
-        Console.WriteLine($"[kiosk] Feedback tuned for: {_session.LevelPhrase} {_session.Subject} (change via the menu bar).");
+        Console.WriteLine($"[kiosk] Feedback tuned for: grade {_session.Grade} {_session.Subject}, {_session.BandDisplay}" +
+            (_session.BilingualLanguage is { } bl ? $", bilingual English + {bl}" : "") +
+            " (change via the menu bar).");
     }
 
     // ── Menu bar: Assignment · Middle School · High School · Help ─────
@@ -96,26 +107,122 @@ public sealed class KioskForm : Form
         reports.DropDownItems.Add(new ToolStripMenuItem(
             "Open Feedback Log Folder", null, (_, _) => OpenLogFolder()));
 
+        _gradeBandMenu = new ToolStripMenuItem("Grade && Band");
+        for (var g = 6; g <= 12; g++)
+        {
+            var grade = g;
+            _gradeBandMenu.DropDownItems.Add(new ToolStripMenuItem(
+                $"Grade {grade}", null, (_, _) => SelectGrade(grade)));
+        }
+        _gradeBandMenu.DropDownItems.Add(new ToolStripSeparator());
+        foreach (var (key, display) in Bands.All)
+        {
+            var bandKey = key;
+            _gradeBandMenu.DropDownItems.Add(new ToolStripMenuItem(
+                display, null, (_, _) => SelectBand(bandKey)));
+        }
+
+        _bilingualMenu = new ToolStripMenuItem("Bilingual");
+        _bilingualMenu.DropDownItems.Add(new ToolStripMenuItem(
+            "Off — English only", null, (_, _) => SelectBilingual(null)));
+        _bilingualMenu.DropDownItems.Add(new ToolStripSeparator());
+        foreach (var language in BilingualLanguages)
+        {
+            var lang = language;
+            _bilingualMenu.DropDownItems.Add(new ToolStripMenuItem(
+                lang, null, (_, _) => SelectBilingual(lang)));
+        }
+        _bilingualMenu.DropDownItems.Add(new ToolStripSeparator());
+        _bilingualMenu.DropDownItems.Add(new ToolStripMenuItem(
+            "Other Language…", null, (_, _) => ChooseCustomLanguage()));
+
         var help = new ToolStripMenuItem("Help && Support");
         help.DropDownItems.Add(new ToolStripMenuItem("Help", null, (_, _) => ShowHelp()));
         help.DropDownItems.Add(new ToolStripMenuItem("Hotkeys", null, (_, _) => ShowHotkeys()));
         help.DropDownItems.Add(new ToolStripMenuItem("About", null, (_, _) => ShowAbout()));
 
-        menu.Items.AddRange([assignment, _middleMenu, _highMenu, reports, help]);
+        menu.Items.AddRange([assignment, _middleMenu, _highMenu, _gradeBandMenu, _bilingualMenu, reports, help]);
         MainMenuStrip = menu;
         Controls.Add(menu);
         _view.BringToFront();
         RefreshSubjectChecks();
     }
 
-    /// <summary>Applies a level+subject choice immediately — no restart.</summary>
+    /// <summary>Applies a level+subject choice immediately — no restart.
+    /// The grade snaps into the chosen level's range if needed.</summary>
     private void SelectSubject(string level, string subject)
     {
         _session.Level = level;
         _session.Subject = subject;
+        _session.Grade = level == Subjects.High
+            ? Math.Clamp(_session.Grade, 9, 12)
+            : Math.Clamp(_session.Grade, 6, 8);
         _session.SaveUiState();
         RefreshSubjectChecks();
-        Console.WriteLine($"[kiosk] Feedback now tuned for: {_session.LevelPhrase} {subject}.");
+        Console.WriteLine($"[kiosk] Feedback now tuned for: grade {_session.Grade} {subject}, {_session.BandDisplay}.");
+    }
+
+    /// <summary>Grade choice; the school level follows the grade, and the
+    /// subject falls back if the new level's catalog lacks it.</summary>
+    private void SelectGrade(int grade)
+    {
+        _session.Grade = grade;
+        var level = grade >= 9 ? Subjects.High : Subjects.Middle;
+        if (level != _session.Level)
+        {
+            _session.Level = level;
+            var catalog = level == Subjects.High ? Subjects.HighSubjects : Subjects.MiddleSubjects;
+            if (!catalog.Contains(_session.Subject))
+                _session.Subject = "Social Studies"; // present in both catalogs
+        }
+        _session.SaveUiState();
+        RefreshSubjectChecks();
+        Console.WriteLine($"[kiosk] Feedback now tuned for: grade {grade} {_session.Subject}, {_session.BandDisplay}.");
+    }
+
+    private void SelectBand(string bandKey)
+    {
+        _session.Band = bandKey;
+        _session.SaveUiState();
+        RefreshSubjectChecks();
+        Console.WriteLine($"[kiosk] Response band: {_session.BandDisplay}.");
+    }
+
+    private void SelectBilingual(string? language)
+    {
+        _session.BilingualLanguage = language;
+        _session.SaveUiState();
+        RefreshSubjectChecks();
+        Console.WriteLine(language is null
+            ? "[kiosk] Bilingual feedback off — English only."
+            : $"[kiosk] Bilingual feedback on: English + {language}.");
+    }
+
+    private void ChooseCustomLanguage()
+    {
+        using var dialog = new Form
+        {
+            Text = "Bilingual feedback — other language",
+            ClientSize = new Size(420, 110),
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ShowIcon = false,
+        };
+        var label = new Label { Text = "Language name (in English), e.g. \"Amharic\":", Dock = DockStyle.Top, Height = 24, Padding = new Padding(8, 6, 8, 0) };
+        var box = new TextBox { Dock = DockStyle.Top, Font = new Font("Segoe UI", 10f), Margin = new Padding(8) };
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, Height = 40, Padding = new Padding(6) };
+        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Width = 80 };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 80 };
+        buttons.Controls.AddRange([ok, cancel]);
+        dialog.Controls.Add(box);
+        dialog.Controls.Add(label);
+        dialog.Controls.Add(buttons);
+        dialog.AcceptButton = ok;
+        dialog.CancelButton = cancel;
+        if (dialog.ShowDialog(this) == DialogResult.OK && box.Text.Trim() is { Length: > 0 } lang)
+            SelectBilingual(lang);
     }
 
     private void RefreshSubjectChecks()
@@ -127,6 +234,26 @@ public sealed class KioskForm : Form
             foreach (ToolStripMenuItem item in menu.DropDownItems)
                 item.Checked = isActiveLevel && item.Text == _session.Subject;
         }
+        foreach (var entry in _gradeBandMenu.DropDownItems)
+        {
+            if (entry is not ToolStripMenuItem item) continue;
+            item.Checked = item.Text == $"Grade {_session.Grade}" || item.Text == _session.BandDisplay;
+        }
+        var current = _session.BilingualLanguage;
+        foreach (var entry in _bilingualMenu.DropDownItems)
+        {
+            if (entry is not ToolStripMenuItem item) continue;
+            item.Checked = current is null
+                ? item.Text == "Off — English only"
+                : item.Text == current;
+        }
+        // A custom language shows as a checked mark on "Other Language…".
+        if (current is not null && !BilingualLanguages.Contains(current))
+            foreach (var entry in _bilingualMenu.DropDownItems)
+                if (entry is ToolStripMenuItem { Text: "Other Language…" } other)
+                    other.Checked = true;
+        _bilingualMenu.Font = new Font(_bilingualMenu.Font ?? Font,
+            current is null ? FontStyle.Regular : FontStyle.Bold);
     }
 
     /// <summary>
@@ -245,7 +372,7 @@ public sealed class KioskForm : Form
         2. Press SPACE — the preview dims while the report is generated (10–25 seconds) and printing starts by itself.
         3. Multi-page work: press N on each earlier page, then SPACE on the last one.
 
-        The menu bar sets the school level & subject the feedback is tuned for, and "Assignment" lets you describe today's task so the feedback focuses on it — both take effect immediately.
+        The menu bar tunes the feedback and every choice takes effect immediately: school level & subject, the specific grade (6-12) and response band (from "Emerging — building foundations" to "Advanced"), a Bilingual option that pairs every feedback item with a chosen home language (for multilingual learners in any subject), and "Assignment" to describe today's task.
 
         Every report's text (never images, never names) is saved to the feedback-log folder for teacher review — see the Reports menu, which can also reprint the last report after a printer jam (or press R). If the camera cable is bumped loose, the title bar says so; reconnect it and press C.
 
