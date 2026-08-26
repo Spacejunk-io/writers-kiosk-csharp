@@ -12,6 +12,8 @@ obj/
 
 # Day-specific teacher notes (assignment.example.txt is the committed template)
 assignment.txt
+# Per-machine UI state (school level & subject selection)
+kiosk-ui.json
 
 # Never commit captured images or generated reports, in case any are
 # ever produced during debugging.

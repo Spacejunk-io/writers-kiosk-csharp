@@ -14,6 +14,9 @@ public sealed class KioskForm : Form
 
     private readonly KioskConfig _cfg;
     private readonly EntraTokenProvider? _entra;
+    private readonly SessionSettings _session;
+    private ToolStripMenuItem _middleMenu = null!;
+    private ToolStripMenuItem _highMenu = null!;
     private readonly PictureBox _view = new() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black };
     private readonly Enhancer _enhancer;
     private readonly object _stateLock = new();
@@ -37,6 +40,7 @@ public sealed class KioskForm : Form
     public KioskForm(KioskConfig cfg)
     {
         _cfg = cfg;
+        _session = SessionSettings.Load(cfg);
         if (cfg.Provider == Provider.Azure && cfg.AzureUseEntra)
             _entra = new EntraTokenProvider(cfg.AzureTenantId, cfg.AzureClientId);
         _enhancer = new Enhancer(cfg.Enhance);
@@ -49,6 +53,8 @@ public sealed class KioskForm : Form
         Controls.Add(_view);
         try { Icon = new Icon(Path.Combine(AppContext.BaseDirectory, "assets", "icon.ico")); } catch { }
 
+        BuildMenu();
+
         if (cfg.WindowPos is { } pos)
         {
             StartPosition = FormStartPosition.Manual;
@@ -56,7 +62,154 @@ public sealed class KioskForm : Form
         }
         if (cfg.AssignmentContext is not null)
             Console.WriteLine("[kiosk] Loaded teacher assignment context from assignment.txt.");
+        Console.WriteLine($"[kiosk] Feedback tuned for: {_session.LevelPhrase} {_session.Subject} (change via the menu bar).");
     }
+
+    // ── Menu bar: Assignment · Middle School · High School · Help ─────
+
+    private void BuildMenu()
+    {
+        var menu = new MenuStrip();
+
+        var assignment = new ToolStripMenuItem("Assignment");
+        assignment.DropDownItems.Add(new ToolStripMenuItem(
+            "Edit Today's Assignment…", null, (_, _) => EditAssignment()));
+
+        _middleMenu = new ToolStripMenuItem("Middle School");
+        foreach (var subject in Subjects.MiddleSubjects)
+            _middleMenu.DropDownItems.Add(new ToolStripMenuItem(
+                subject, null, (_, _) => SelectSubject(Subjects.Middle, subject)));
+
+        _highMenu = new ToolStripMenuItem("High School");
+        foreach (var subject in Subjects.HighSubjects)
+            _highMenu.DropDownItems.Add(new ToolStripMenuItem(
+                subject, null, (_, _) => SelectSubject(Subjects.High, subject)));
+
+        var help = new ToolStripMenuItem("Help && Support");
+        help.DropDownItems.Add(new ToolStripMenuItem("Help", null, (_, _) => ShowHelp()));
+        help.DropDownItems.Add(new ToolStripMenuItem("Hotkeys", null, (_, _) => ShowHotkeys()));
+        help.DropDownItems.Add(new ToolStripMenuItem("About", null, (_, _) => ShowAbout()));
+
+        menu.Items.AddRange([assignment, _middleMenu, _highMenu, help]);
+        MainMenuStrip = menu;
+        Controls.Add(menu);
+        _view.BringToFront();
+        RefreshSubjectChecks();
+    }
+
+    /// <summary>Applies a level+subject choice immediately — no restart.</summary>
+    private void SelectSubject(string level, string subject)
+    {
+        _session.Level = level;
+        _session.Subject = subject;
+        _session.SaveUiState();
+        RefreshSubjectChecks();
+        Console.WriteLine($"[kiosk] Feedback now tuned for: {_session.LevelPhrase} {subject}.");
+    }
+
+    private void RefreshSubjectChecks()
+    {
+        foreach (var (menu, level) in new[] { (_middleMenu, Subjects.Middle), (_highMenu, Subjects.High) })
+        {
+            var isActiveLevel = _session.Level == level;
+            menu.Font = new Font(menu.Font ?? Font, isActiveLevel ? FontStyle.Bold : FontStyle.Regular);
+            foreach (ToolStripMenuItem item in menu.DropDownItems)
+                item.Checked = isActiveLevel && item.Text == _session.Subject;
+        }
+    }
+
+    /// <summary>
+    /// In-app assignment editing: takes effect on the very next capture
+    /// and is saved back to assignment.txt so it survives restarts.
+    /// </summary>
+    private void EditAssignment()
+    {
+        using var dialog = new Form
+        {
+            Text = "Today's Assignment — a few plain sentences that focus the AI feedback",
+            ClientSize = new Size(640, 400),
+            StartPosition = FormStartPosition.CenterParent,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ShowIcon = false,
+        };
+        var box = new TextBox
+        {
+            Multiline = true,
+            ScrollBars = ScrollBars.Vertical,
+            Dock = DockStyle.Fill,
+            Font = new Font("Segoe UI", 11f),
+            Text = _session.AssignmentContext ?? "",
+        };
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            FlowDirection = FlowDirection.RightToLeft,
+            Height = 44,
+            Padding = new Padding(8),
+        };
+        var save = new Button { Text = "Save", DialogResult = DialogResult.OK, Width = 90 };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 90 };
+        var clear = new Button { Text = "Clear", Width = 90 };
+        clear.Click += (_, _) => box.Text = "";
+        buttons.Controls.AddRange([save, cancel, clear]);
+        dialog.Controls.Add(box);
+        dialog.Controls.Add(buttons);
+        dialog.CancelButton = cancel;
+
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        var text = box.Text.Trim();
+        _session.AssignmentContext = text.Length > 0 ? text : null;
+        try
+        {
+            File.WriteAllText(_cfg.AssignmentFile, text);
+            Console.WriteLine(text.Length > 0
+                ? $"[kiosk] Assignment context updated (saved to {_cfg.AssignmentFile}); applies to the next capture."
+                : "[kiosk] Assignment context cleared — feedback returns to general mode.");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[kiosk] Assignment applied for this session, but saving failed: {ex.Message}");
+        }
+    }
+
+    private void ShowHelp() => MessageBox.Show(this,
+        """
+        Writer's Kiosk gives students printed AI feedback on their written classwork.
+
+        1. Place the page under the document camera; check it is sharp and fills the preview.
+        2. Press SPACE — the preview dims while the report is generated (10–25 seconds) and printing starts by itself.
+        3. Multi-page work: press N on each earlier page, then SPACE on the last one.
+
+        The menu bar sets the school level & subject the feedback is tuned for, and "Assignment" lets you describe today's task so the feedback focuses on it — both take effect immediately.
+
+        Off-topic or blank pages show a brief on-screen notice instead of printing. Keep student names off submitted pages (a cover strip at the station handles exceptions).
+        """,
+        "Help — Writer's Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+    private void ShowHotkeys() => MessageBox.Show(this,
+        """
+        SPACE  — capture the page and print feedback (cooldown between submissions)
+        N      — add this page to a multi-page submission (up to 4), then SPACE to finish
+        C      — switch to the next connected camera
+        V / H  — flip the image vertically / horizontally
+        E      — toggle auto image enhancement (white balance + exposure)
+        ESC    — quit the kiosk
+        """,
+        "Hotkeys — Writer's Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+    private void ShowAbout() => MessageBox.Show(this,
+        $"""
+        Writer's Kiosk (C# edition) v{Application.ProductVersion}
+
+        A privacy-first classroom kiosk: student work is photographed in memory only (never saved), analyzed by an AI writing coach, and returned as a printed feedback report.
+
+        Copyright (C) 2026 Spacejunk-IO — George Bacon
+        Free software under the GNU GPL v3 or later.
+        https://github.com/Spacejunk-io/writers-kiosk-csharp
+        """,
+        "About — Writer's Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
     protected override async void OnShown(EventArgs e)
     {
@@ -320,13 +473,13 @@ public sealed class KioskForm : Form
             string? error = null;
             try
             {
-                var markdown = await LlmClient.GetFeedbackAsync(_cfg, pages, _entra);
+                var markdown = await LlmClient.GetFeedbackAsync(_cfg, pages, _session, _entra);
                 pages.Clear(); // image bytes released before printing
-                notice = LlmClient.NoticeFor(markdown);
+                notice = LlmClient.NoticeFor(markdown, _session);
                 if (notice is null)
                 {
                     Console.WriteLine("[kiosk] Feedback received. Printing…");
-                    Printing.PrintMarkdown(markdown, _cfg);
+                    Printing.PrintMarkdown(markdown, _cfg, _session.Subject);
                 }
             }
             catch (Exception ex)

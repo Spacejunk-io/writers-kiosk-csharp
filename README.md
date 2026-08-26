@@ -1,18 +1,30 @@
 # Writer's Kiosk (C#)
 
-The C#/.NET port of [Writer's Kiosk](https://github.com/Spacejunk-io/writers-kiosk)
-(originally Rust) — a privacy-first classroom kiosk for 8th-grade US
-History and social studies writing. A student places handwritten or
-printed work under a document camera, presses **Spacebar**, and a
-one-to-two-page AI feedback report — Praise (Glow), Questions (Grow),
-Polish (Action), and an Accuracy Check — prints automatically,
-double-sided if the printer supports it. No accounts, no clicks, no
-saved images. Free software under the GPL-3.0-or-later.
+A privacy-first classroom kiosk for middle- and high-school writing
+feedback, in C# on .NET 10 (originally implemented in Rust). A student
+places handwritten **or typed** work under a document camera, presses
+**Spacebar**, and a one-to-two-page AI feedback report — Praise (Glow),
+Questions (Grow), Polish (Action), and an Accuracy Check — prints
+automatically, double-sided if the printer supports it. No accounts, no
+clicks, no saved images. Free software under the GPL-3.0-or-later.
 
-Both editions share the same feature set, the same `.env` configuration,
-the same system prompt, and the same privacy architecture — choose
-whichever toolchain your environment prefers. This edition is a Windows
-Forms app on .NET 10.
+**The menu bar** tunes everything live, no restart needed:
+
+- **Assignment → Edit Today's Assignment…** — type a few sentences about
+  today's task; the feedback focuses on it from the very next capture
+  (saved to `assignment.txt` so it survives restarts).
+- **Middle School / High School** — pick the class subject (ELA/English,
+  Mathematics, Science, Social Studies, Health & PE, arts, world
+  languages, technology/CTE, and more per level); the AI's persona,
+  feedback emphases, accuracy checking, and refusal scope all shift to
+  that subject and grade band instantly. The choice persists per machine.
+- **Help & Support** — Help, Hotkeys, and About.
+
+Student work is graded whether handwritten or typed — a printed page
+that reads as the student's own composition (a typed essay, a printed
+draft) is analyzed like any handwriting. Only printed *instructional*
+material (directions, question stems, rubrics, source excerpts) stays
+ungraded context.
 
 **Controls at a glance:**
 

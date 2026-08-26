@@ -30,6 +30,8 @@ public sealed class KioskConfig
     public string? Duplex { get; private init; }
     public Point? WindowPos { get; private init; }
     public string? AssignmentContext { get; private init; }
+    /// <summary>Where the in-app assignment editor saves (ASSIGNMENT_FILE).</summary>
+    public string AssignmentFile { get; private init; } = "assignment.txt";
     public bool FlipVertical { get; private init; }
     public bool FlipHorizontal { get; private init; }
     public bool Enhance { get; private init; }
@@ -114,6 +116,7 @@ public sealed class KioskConfig
             },
             WindowPos = windowPos,
             AssignmentContext = assignment,
+            AssignmentFile = assignmentFile,
             FlipVertical = Flag("FLIP_VERTICAL"),
             FlipHorizontal = Flag("FLIP_HORIZONTAL"),
             Enhance = Get("ENHANCE").ToLowerInvariant() is not ("0" or "false" or "off" or "no"),
