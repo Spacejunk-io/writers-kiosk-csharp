@@ -13,6 +13,8 @@
     <AssemblyName>writers-kiosk</AssemblyName>
     <ApplicationIcon>assets\icon.ico</ApplicationIcon>
     <Version>1.0.1</Version>
+    <Company>Spacejunk-IO</Company>
+    <Product>Writer's Kiosk</Product>
     <Authors>Spacejunk-io — George Bacon</Authors>
     <Copyright>Copyright (C) 2026 Spacejunk-io — George Bacon</Copyright>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
