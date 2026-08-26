@@ -168,6 +168,32 @@ writers-kiosk-csharp/
 └── LICENSE                  GNU GPL v3 (GPL-3.0-or-later)
 ```
 
+## Safety notices (mandated-reporting support)
+
+If a submission appears to contain a real personal disclosure (abuse,
+self-harm, a threat of harm), nothing prints: the student sees a calm
+"Please bring this page to your teacher," and the event reaches adults
+via the console and a metadata-only `safety-log.md` line — never the
+content or any identity, neither of which the kiosk possesses. A
+district can additionally route alerts through its own notification
+flow (`SAFETY_WEBHOOK_URL`, e.g. Power Automate) that emails the
+school's designated staff lists, maintained centrally by IT. Academic
+content — historical violence, literature themes, health topics — is
+explicitly excluded from triggering. The human educator remains the
+mandated reporter; an alert is an internal notification, never the
+legal report. Enabling district routing is an administrative decision.
+
+## Version history
+
+| Version | Highlights |
+| --- | --- |
+| 1.0.1 | Full parity with the Rust original: capture → GPT-4o feedback → silent duplex printing; cooldowns |
+| 1.1.0 | Keyless Entra ID sign-in for Azure OpenAI (no API key on disk) |
+| 1.2.0 | Menu bar: live assignment editing, level/subject feedback tuning, Help & Support; typed student work graded |
+| 1.3.0 | Teacher feedback log, R-key reprint recovery, camera-loss resilience; bilingual World Languages mode |
+| 1.4.0 | Safety notices for mandated-reporting support (dormant until district-configured) |
+| 1.5.0 | Grade 6–12 + five-band response calibration; bilingual option for multilingual learners in any subject |
+
 ## License
 
 Copyright (C) 2026 Spacejunk-io — George Bacon <spacejunk572@gmail.com>
