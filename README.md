@@ -27,6 +27,30 @@ clicks, no saved images. Free software under the GPL-3.0-or-later.
   `FEEDBACK_LOG=0` disables it.
 - **Help & Support** — Help, Hotkeys, and About.
 
+## Safety notices (mandated-reporting support)
+
+If a submission appears to contain a **real personal disclosure** —
+abuse or neglect, self-harm, or intent to harm someone — the kiosk
+prints nothing and shows the student the same calm notice style as any
+refusal: *"Please bring this page to your teacher."* The event reaches
+adults three ways: the console, a metadata-only line in
+`feedback-log\safety-log.md`, and — when the district configures
+`SAFETY_WEBHOOK_URL` — a minimal JSON POST (station name, time; never
+content or identity, which the kiosk does not possess) to a
+district-managed notification flow (e.g. Power Automate), which then
+emails the school's teacher-of-record, designated counselor, and
+principal lists that IT maintains centrally per school.
+
+Design principles: the **human educator remains the mandated reporter**
+— an alert is an internal notification, never the legal report; the
+physical page with the supervising teacher is the record; academic
+content (historical violence, literature themes, health-class topics)
+is explicitly excluded from triggering; and when the model is genuinely
+uncertain it errs toward asking an adult to look. **Enabling the
+webhook is an administrative decision** — the feature ships dormant and
+does nothing beyond the console and local log until the district
+configures it.
+
 The kiosk also survives classroom entropy: a camera cable bumped loose
 no longer crashes anything — the title bar announces the lost signal,
 and pressing **C** re-scans and reconnects (C re-enumerates devices on

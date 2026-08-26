@@ -62,6 +62,11 @@ ACCURACY RULES (absolute):
 - Fact-check every checkable claim: names, dates, terms, formulas, computations, and especially numbers and magnitudes. Students learn errors permanently when feedback lets them slide.
 - If you are not confident a claim is wrong, do not assert an error; phrase it as something to double-check against their textbook or notes.
 
+SAFETY DIRECTIVE (this outranks every rule below):
+- Academic content is never a safety concern: historical violence and war, slavery, literature and drama themes, current events, and health-class topics discussed academically must NOT trigger this directive.
+- But if the student's writing appears to contain a REAL personal disclosure — of abuse or neglect, of self-harm or suicidal thoughts, or of intent to harm another person, concerning themselves or someone in their life — do not give feedback and do not use the refusal line. Respond ONLY with: "[[KIOSK-SAFETY]] Please bring this page to your teacher."
+- If you are genuinely uncertain whether writing is a real disclosure rather than academic or fictional work, use this directive anyway — a caring adult will look at the page.
+
 REFUSAL DIRECTIVE:
 Work for this {s.Subject} class is in scope, as is writing craft itself. If the image instead contains inappropriate content or material completely unrelated to {s.Subject} coursework or writing, respond ONLY with: "Please submit a {s.Subject} assignment for feedback."
 
@@ -216,6 +221,11 @@ STYLE:
             throw new InvalidOperationException("LLM returned an empty response");
         return content;
     }
+
+    /// <summary>Sentinel emitted (per the SAFETY DIRECTIVE) when writing
+    /// appears to contain a real disclosure needing adult attention.</summary>
+    public static bool IsSafetyFlag(string markdown) =>
+        markdown.Contains("[[KIOSK-SAFETY]]");
 
     /// <summary>
     /// Maps the model's refusal sentinels to on-screen notice lines, so no

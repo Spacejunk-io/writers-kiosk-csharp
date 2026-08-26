@@ -38,6 +38,11 @@ public sealed class KioskConfig
     public int CooldownSeconds { get; private init; }
     /// <summary>Append each report's text to feedback-log\ for teacher review (default on).</summary>
     public bool FeedbackLogEnabled { get; private init; }
+    /// <summary>District notification flow URL (e.g. Power Automate) for
+    /// safety alerts; unset = console + local safety log only.</summary>
+    public string? SafetyWebhookUrl { get; private init; }
+    /// <summary>Human-readable station identity used in safety alerts.</summary>
+    public string StationName { get; private init; } = "";
 
     public static KioskConfig Load()
     {
@@ -124,6 +129,8 @@ public sealed class KioskConfig
             Enhance = Get("ENHANCE").ToLowerInvariant() is not ("0" or "false" or "off" or "no"),
             CooldownSeconds = int.TryParse(Get("COOLDOWN_SECONDS"), out var cd) ? cd : 8,
             FeedbackLogEnabled = Get("FEEDBACK_LOG").ToLowerInvariant() is not ("0" or "false" or "off" or "no"),
+            SafetyWebhookUrl = Get("SAFETY_WEBHOOK_URL") is { Length: > 0 } wh ? wh : null,
+            StationName = Get("STATION_NAME", Environment.MachineName),
         };
     }
 }

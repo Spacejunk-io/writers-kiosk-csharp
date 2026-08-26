@@ -601,8 +601,26 @@ public sealed class KioskForm : Form
             {
                 var markdown = await LlmClient.GetFeedbackAsync(_cfg, pages, _session, _entra);
                 pages.Clear(); // image bytes released before printing
-                notice = LlmClient.NoticeFor(markdown, _session);
-                if (notice is null)
+                if (LlmClient.IsSafetyFlag(markdown))
+                {
+                    // Possible real disclosure: nothing prints, nothing is
+                    // logged as feedback; the student sees the same calm
+                    // notice style as any refusal, and staff are alerted
+                    // through SafetyAlert (console, safety log, and the
+                    // district flow when configured).
+                    notice =
+                    [
+                        "Nothing was printed.",
+                        "Please bring this page to your teacher.",
+                    ];
+                    await SafetyAlert.RaiseAsync(_cfg, _session.Subject);
+                    markdown = "";
+                }
+                else
+                {
+                    notice = LlmClient.NoticeFor(markdown, _session);
+                }
+                if (markdown.Length > 0 && notice is null)
                 {
                     // Retain and log the text BEFORE printing, so a
                     // printer failure can never destroy the feedback.

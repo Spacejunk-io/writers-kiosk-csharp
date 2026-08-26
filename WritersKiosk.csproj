@@ -12,7 +12,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>writers-kiosk</AssemblyName>
     <ApplicationIcon>assets\icon.ico</ApplicationIcon>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
     <Company>Spacejunk-IO</Company>
     <Product>Writer's Kiosk</Product>
     <Authors>Spacejunk-io — George Bacon</Authors>
