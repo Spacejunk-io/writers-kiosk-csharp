@@ -1,0 +1,30 @@
+#!/bin/sh
+# Writer's Kiosk secret guard.
+# Blocks commits that contain a .env file or anything that looks like a
+# real API key, so credentials can never reach GitHub — even in future
+# changes. Enable once per clone with:
+#   git config core.hooksPath .githooks
+
+# 1. No environment files, ever (the template .env.example is allowed).
+staged_env=$(git diff --cached --name-only | grep -Ei '(^|/)\.env(\.|$)' | grep -v '\.env\.example$')
+if [ -n "$staged_env" ]; then
+    echo "COMMIT BLOCKED: environment files must never be committed:" >&2
+    echo "$staged_env" >&2
+    echo "Unstage with: git restore --staged <file>" >&2
+    exit 1
+fi
+
+# 2. No added line may contain something shaped like a live credential
+#    (OpenAI-style sk-... tokens, or key assignments with long random
+#    values). Placeholders like REPLACE_ME do not match.
+leaks=$(git diff --cached -U0 | grep -E '^\+' | grep -Ev '^\+\+\+' | \
+    grep -E 'sk-[A-Za-z0-9_-]{20,}|(api[_-]?key|apikey|secret|token)["'\'' ]*[=:]["'\'' ]*[A-Za-z0-9+/_-]{24,}' | \
+    grep -iv 'REPLACE_ME')
+if [ -n "$leaks" ]; then
+    echo "COMMIT BLOCKED: a staged line looks like a real API key or secret:" >&2
+    echo "$leaks" >&2
+    echo "If this is a false positive, rewrite the line so it does not embed a credential-shaped string." >&2
+    exit 1
+fi
+
+exit 0

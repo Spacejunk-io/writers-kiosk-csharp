@@ -1,0 +1,25 @@
+# Build artifacts
+bin/
+obj/
+*.user
+
+# ── SECRETS: never commit the real environment file ────────────────
+# The .env file holds the live API key. Only .env.example (a template
+# with placeholder values) belongs in version control.
+.env
+.env.*
+!.env.example
+
+# Day-specific teacher notes (assignment.example.txt is the committed template)
+assignment.txt
+
+# Never commit captured images or generated reports, in case any are
+# ever produced during debugging.
+*.jpg
+*.jpeg
+*.png
+*.pdf
+kiosk_report*.html
+# ...but the application icon artwork is part of the project.
+!assets/icon.png
+!assets/icon.ico

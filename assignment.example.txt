@@ -1,0 +1,14 @@
+Copy this file to assignment.txt and edit it each day (or leave assignment.txt
+absent for general feedback). The kiosk reads it at startup and uses it to
+focus the AI's feedback on today's assignment. A few plain sentences work best.
+
+Example for a lesson like Unit 1, Lesson 01 (the 1763 crisis):
+
+Today's assignment is the Lesson 01 Atlas Worksheets, sections 1-6 on the
+French & Indian War, plus the MCAP historical reasoning check. Students were
+assigned sections 1-6 only; other pages are not assigned. For the MCAP check,
+look for: a clear claim about how the war produced the imperial crisis, at
+least two supporting details that name their sources (map B, chart D, or
+graph F), the cause-and-effect mechanism, and one qualification or limit of
+the evidence. Common issue to watch for: students citing evidence without
+naming which map or graph it came from.

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Console Exe (not WinExe) on purpose: the console window shows the
+         kiosk log (camera list, cooldowns, token usage), like the Rust
+         original. -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>writers-kiosk</AssemblyName>
+    <ApplicationIcon>assets\icon.ico</ApplicationIcon>
+    <Version>1.0.1</Version>
+    <Authors>Spacejunk-io — George Bacon</Authors>
+    <Copyright>Copyright (C) 2026 Spacejunk-io — George Bacon</Copyright>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/Spacejunk-io/writers-kiosk-csharp</RepositoryUrl>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="assets\icon.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Camera capture (managed, no native install needed) -->
+    <PackageReference Include="FlashCap" Version="1.10.0" />
+    <!-- Markdown -> HTML for the printed report -->
+    <PackageReference Include="Markdig" Version="0.41.0" />
+    <!-- .env loading (same semantics as the Rust dotenvy) -->
+    <PackageReference Include="DotNetEnv" Version="3.1.1" />
+  </ItemGroup>
+
+</Project>
