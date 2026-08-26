@@ -27,3 +27,6 @@ kiosk_report*.html
 # ...but the application icon artwork is part of the project.
 !assets/icon.png
 !assets/icon.ico
+
+# Local handover materials (BCPS-specific; never published)
+handover/
