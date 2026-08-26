@@ -36,6 +36,8 @@ public sealed class KioskConfig
     public bool FlipHorizontal { get; private init; }
     public bool Enhance { get; private init; }
     public int CooldownSeconds { get; private init; }
+    /// <summary>Append each report's text to feedback-log\ for teacher review (default on).</summary>
+    public bool FeedbackLogEnabled { get; private init; }
 
     public static KioskConfig Load()
     {
@@ -121,6 +123,7 @@ public sealed class KioskConfig
             FlipHorizontal = Flag("FLIP_HORIZONTAL"),
             Enhance = Get("ENHANCE").ToLowerInvariant() is not ("0" or "false" or "off" or "no"),
             CooldownSeconds = int.TryParse(Get("COOLDOWN_SECONDS"), out var cd) ? cd : 8,
+            FeedbackLogEnabled = Get("FEEDBACK_LOG").ToLowerInvariant() is not ("0" or "false" or "off" or "no"),
         };
     }
 }

@@ -31,6 +31,11 @@ public sealed class KioskForm : Form
 
     private bool _busy;
     private bool _flipV, _flipH;
+    private (string Markdown, string Subject)? _lastReport;
+    private DateTime _lastFrameAt = DateTime.MaxValue;
+    private DateTime _lastFrameErrorAt = DateTime.MinValue;
+    private bool _cameraLost;
+    private readonly System.Windows.Forms.Timer _watchdog = new() { Interval = 1000 };
     private readonly List<byte[]> _batch = [];
     private string[]? _noticeLines;
     private DateTime _noticeUntil;
@@ -85,12 +90,18 @@ public sealed class KioskForm : Form
             _highMenu.DropDownItems.Add(new ToolStripMenuItem(
                 subject, null, (_, _) => SelectSubject(Subjects.High, subject)));
 
+        var reports = new ToolStripMenuItem("Reports");
+        reports.DropDownItems.Add(new ToolStripMenuItem(
+            "Reprint Last Report  (R)", null, (_, _) => ReprintLast()));
+        reports.DropDownItems.Add(new ToolStripMenuItem(
+            "Open Feedback Log Folder", null, (_, _) => OpenLogFolder()));
+
         var help = new ToolStripMenuItem("Help && Support");
         help.DropDownItems.Add(new ToolStripMenuItem("Help", null, (_, _) => ShowHelp()));
         help.DropDownItems.Add(new ToolStripMenuItem("Hotkeys", null, (_, _) => ShowHotkeys()));
         help.DropDownItems.Add(new ToolStripMenuItem("About", null, (_, _) => ShowAbout()));
 
-        menu.Items.AddRange([assignment, _middleMenu, _highMenu, help]);
+        menu.Items.AddRange([assignment, _middleMenu, _highMenu, reports, help]);
         MainMenuStrip = menu;
         Controls.Add(menu);
         _view.BringToFront();
@@ -174,6 +185,58 @@ public sealed class KioskForm : Form
         }
     }
 
+    /// <summary>
+    /// Reprints the most recent report — no new capture, no API cost.
+    /// The printer-jam recovery path.
+    /// </summary>
+    private void ReprintLast()
+    {
+        (string Markdown, string Subject)? last;
+        lock (_stateLock) last = _lastReport;
+        if (last is null)
+        {
+            Console.WriteLine("[kiosk] No report to reprint yet this session.");
+            return;
+        }
+        lock (_stateLock) _busy = true;
+        Text = "Writer's Kiosk — reprinting the last report…";
+        Task.Run(() =>
+        {
+            string? error = null;
+            try { Printing.PrintMarkdown(last.Value.Markdown, _cfg, last.Value.Subject); }
+            catch (Exception ex) { error = ex.Message; }
+            try
+            {
+                BeginInvoke(() =>
+                {
+                    lock (_stateLock) _busy = false;
+                    Text = TitleReady;
+                    Console.WriteLine(error is null
+                        ? "[kiosk] Reprint sent to the printer."
+                        : $"[kiosk] Reprint failed: {error}");
+                });
+            }
+            catch (ObjectDisposedException) { }
+        });
+    }
+
+    private void OpenLogFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(FeedbackLog.Folder);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = Path.GetFullPath(FeedbackLog.Folder),
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[kiosk] Could not open the log folder: {ex.Message}");
+        }
+    }
+
     private void ShowHelp() => MessageBox.Show(this,
         """
         Writer's Kiosk gives students printed AI feedback on their written classwork.
@@ -183,6 +246,8 @@ public sealed class KioskForm : Form
         3. Multi-page work: press N on each earlier page, then SPACE on the last one.
 
         The menu bar sets the school level & subject the feedback is tuned for, and "Assignment" lets you describe today's task so the feedback focuses on it — both take effect immediately.
+
+        Every report's text (never images, never names) is saved to the feedback-log folder for teacher review — see the Reports menu, which can also reprint the last report after a printer jam (or press R). If the camera cable is bumped loose, the title bar says so; reconnect it and press C.
 
         Off-topic or blank pages show a brief on-screen notice instead of printing. Keep student names off submitted pages (a cover strip at the station handles exceptions).
         """,
@@ -195,6 +260,7 @@ public sealed class KioskForm : Form
         C      — switch to the next connected camera
         V / H  — flip the image vertically / horizontally
         E      — toggle auto image enhancement (white balance + exposure)
+        R      — reprint the last report (no new AI request; printer-jam recovery)
         ESC    — quit the kiosk
         """,
         "Hotkeys — Writer's Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -236,6 +302,8 @@ public sealed class KioskForm : Form
             _camIndex = Math.Min(_cfg.CameraIndex, _descriptors.Count - 1);
             Console.WriteLine($"[kiosk] Opening camera {_camIndex}…");
             await OpenCameraAsync(_camIndex);
+            _watchdog.Tick += OnWatchdogTick;
+            _watchdog.Start();
         }
         catch (Exception ex)
         {
@@ -262,15 +330,58 @@ public sealed class KioskForm : Form
             .First();
         _device = await descriptor.OpenAsync(characteristics, OnFrame);
         await _device.StartAsync();
+        _lastFrameAt = DateTime.Now;
         Console.WriteLine($"[kiosk] Camera streaming at {characteristics.Width}x{characteristics.Height}.");
+    }
+
+    /// <summary>
+    /// Watches for a camera that has stopped delivering frames (cable
+    /// bumped loose, device sleep) and says so instead of crashing.
+    /// </summary>
+    private void OnWatchdogTick(object? sender, EventArgs e)
+    {
+        if (_device is null || _switching || _lastFrameAt == DateTime.MaxValue) return;
+        var stale = DateTime.Now - _lastFrameAt > TimeSpan.FromSeconds(3);
+        if (stale && !_cameraLost)
+        {
+            _cameraLost = true;
+            Text = "Writer's Kiosk — camera signal lost · check the cable, then press C to reconnect";
+            Console.Error.WriteLine("[kiosk] Camera signal lost — check the USB cable, then press C to reconnect.");
+        }
+        else if (!stale && _cameraLost)
+        {
+            _cameraLost = false;
+            if (!_busy) Text = TitleReady;
+            Console.WriteLine("[kiosk] Camera signal restored.");
+        }
     }
 
     /// <summary>Runs on FlashCap's capture thread for every frame.</summary>
     private void OnFrame(PixelBufferScope scope)
     {
+        // A bad frame (device yanked mid-transfer, decoder hiccup) must
+        // never take the kiosk down — drop it and keep streaming.
+        try
+        {
+            OnFrameCore(scope);
+        }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            if (DateTime.Now - _lastFrameErrorAt > TimeSpan.FromSeconds(5))
+            {
+                _lastFrameErrorAt = DateTime.Now;
+                Console.Error.WriteLine($"[kiosk] Camera frame error: {ex.Message}");
+            }
+        }
+    }
+
+    private void OnFrameCore(PixelBufferScope scope)
+    {
         byte[] imageBytes;
         try { imageBytes = scope.Buffer.ExtractImage(); }
         finally { scope.ReleaseNow(); }
+        _lastFrameAt = DateTime.Now;
 
         Bitmap frame;
         using (var ms = new MemoryStream(imageBytes))
@@ -379,20 +490,35 @@ public sealed class KioskForm : Form
                 Console.WriteLine($"[kiosk] Auto image enhancement {(_enhancer.Enabled ? "on" : "off")}.");
                 break;
 
-            case Keys.C when !_busy && !_switching && _descriptors.Count > 1:
+            case Keys.C when !_busy && !_switching:
+                // C both switches cameras and recovers a lost one: the
+                // device list is re-enumerated fresh on every press.
                 _switching = true;
-                var next = (_camIndex + 1) % _descriptors.Count;
                 try
                 {
-                    await OpenCameraAsync(next);
-                    _camIndex = next;
-                    Console.WriteLine($"[kiosk] Switched to camera {next}: {_descriptors[next].Name}");
+                    var found = new CaptureDevices().EnumerateDescriptors().ToArray();
+                    if (found.Length == 0)
+                    {
+                        Console.Error.WriteLine("[kiosk] No cameras detected — plug one in, then press C again.");
+                    }
+                    else
+                    {
+                        _descriptors = found;
+                        var next = (_camIndex + 1) % found.Length;
+                        await OpenCameraAsync(next);
+                        _camIndex = next;
+                        Console.WriteLine($"[kiosk] Now using camera {next}: {found[next].Name}");
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"[kiosk] Could not switch to camera {next}: {ex.Message}");
+                    Console.Error.WriteLine($"[kiosk] Camera reconnect failed: {ex.Message} — press C to try again.");
                 }
                 finally { _switching = false; }
+                break;
+
+            case Keys.R when !_busy:
+                ReprintLast();
                 break;
 
             case Keys.N when !_busy:
@@ -478,8 +604,25 @@ public sealed class KioskForm : Form
                 notice = LlmClient.NoticeFor(markdown, _session);
                 if (notice is null)
                 {
+                    // Retain and log the text BEFORE printing, so a
+                    // printer failure can never destroy the feedback.
+                    var subject = _session.Subject;
+                    lock (_stateLock) _lastReport = (markdown, subject);
+                    if (_cfg.FeedbackLogEnabled)
+                    {
+                        var logged = FeedbackLog.Append(markdown, subject);
+                        if (logged is not null)
+                            Console.WriteLine($"[kiosk] Feedback text saved to {logged} for teacher review.");
+                    }
                     Console.WriteLine("[kiosk] Feedback received. Printing…");
-                    Printing.PrintMarkdown(markdown, _cfg, _session.Subject);
+                    try
+                    {
+                        Printing.PrintMarkdown(markdown, _cfg, subject);
+                    }
+                    catch (Exception pex)
+                    {
+                        error = $"Printing failed: {pex.Message}\n[kiosk] The feedback text is safe — fix the printer, then press R (or Reports menu) to reprint without a new AI request.";
+                    }
                 }
             }
             catch (Exception ex)
@@ -517,6 +660,7 @@ public sealed class KioskForm : Form
     protected override async void OnFormClosing(FormClosingEventArgs e)
     {
         base.OnFormClosing(e);
+        _watchdog.Stop();
         if (_device is not null)
         {
             var device = _device;

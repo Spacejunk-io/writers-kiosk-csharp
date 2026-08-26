@@ -18,7 +18,19 @@ clicks, no saved images. Free software under the GPL-3.0-or-later.
   languages, technology/CTE, and more per level); the AI's persona,
   feedback emphases, accuracy checking, and refusal scope all shift to
   that subject and grade band instantly. The choice persists per machine.
+- **Reports** — reprint the last report (also the **R** key; a printer
+  jam never costs a second AI request), and open the **feedback log**:
+  every report's text (never images, never names) is appended to
+  `feedback-log\YYYY-MM-DD.md` — written *before* printing is attempted,
+  so feedback can't be lost — giving the teacher a real review trail
+  behind the printed footer's "reviewed under your teacher's direction."
+  `FEEDBACK_LOG=0` disables it.
 - **Help & Support** — Help, Hotkeys, and About.
+
+The kiosk also survives classroom entropy: a camera cable bumped loose
+no longer crashes anything — the title bar announces the lost signal,
+and pressing **C** re-scans and reconnects (C re-enumerates devices on
+every press, so it recovers unplugged/replugged cameras too).
 
 Student work is graded whether handwritten or typed — a printed page
 that reads as the student's own composition (a typed essay, a printed
@@ -35,6 +47,7 @@ ungraded context.
 | **C** | Switch to the next connected camera |
 | **V** / **H** | Flip the image vertically / horizontally |
 | **E** | Toggle auto image enhancement (white balance + exposure; on by default) |
+| **R** | Reprint the last report (no new AI request — printer-jam recovery) |
 | **Esc** | Quit the kiosk |
 
 ## Privacy & security design
