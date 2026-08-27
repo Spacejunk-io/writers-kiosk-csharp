@@ -128,6 +128,23 @@ public sealed class PrintingTests
         Assert.Equal(3, blocks.Count);
     }
 
+    [Theory]
+    [InlineData("long", System.Drawing.Printing.Duplex.Vertical)]
+    [InlineData("short", System.Drawing.Printing.Duplex.Horizontal)]
+    public void DuplexSettingMapsToTheDriverValue(string duplex, System.Drawing.Printing.Duplex expected) =>
+        Assert.Equal(expected, Printing.ToDuplex(duplex));
+
+    [Theory]
+    [InlineData("Microsoft Print to PDF", true)]
+    [InlineData("Adobe PDF", true)]
+    [InlineData("Microsoft XPS Document Writer", true)]
+    [InlineData("OneNote (Desktop)", true)]
+    [InlineData("Fax", true)]
+    [InlineData("Lexmark MS310d", false)]
+    [InlineData("Library Laser 2", false)]
+    public void FileMakingPrintersAreDetected(string name, bool virtualExpected) =>
+        Assert.Equal(virtualExpected, Printing.IsVirtualPrinter(name));
+
     private static int CountOf(string haystack, string needle)
     {
         var count = 0;

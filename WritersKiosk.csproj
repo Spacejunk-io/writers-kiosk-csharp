@@ -5,14 +5,16 @@
          console showed (camera list, cooldowns, token usage, declines)
          lives in the in-app Activity Log (Reports menu, or the L key). -->
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- Windows-10-versioned TFM: exposes the in-box Windows.Data.Pdf
+         engine used for silent printing when SumatraPDF is absent. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>writers-kiosk</AssemblyName>
     <ApplicationIcon>assets\icon.ico</ApplicationIcon>
-    <Version>1.6.0</Version>
+    <Version>1.6.1</Version>
     <Company>Spacejunk-IO</Company>
     <Product>Writer's Kiosk</Product>
     <Authors>Spacejunk-io — George Bacon</Authors>

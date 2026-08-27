@@ -721,9 +721,20 @@ public sealed class KioskForm : Form
         }
     }
 
+    private int _frameBusy;
+
     /// <summary>Runs on FlashCap's capture thread for every frame.</summary>
     private void OnFrame(PixelBufferScope scope)
     {
+        // Decode + enhance at full document-camera resolution can take
+        // longer than one frame interval; letting frames queue behind
+        // it only builds preview lag. Drop the frame instead — the next
+        // one is newer anyway.
+        if (Interlocked.CompareExchange(ref _frameBusy, 1, 0) != 0)
+        {
+            scope.ReleaseNow();
+            return;
+        }
         // A bad frame (device yanked mid-transfer, decoder hiccup) must
         // never take the kiosk down — drop it and keep streaming.
         try
@@ -738,6 +749,10 @@ public sealed class KioskForm : Form
                 _lastFrameErrorAt = DateTime.Now;
                 KioskLog.Warn($"Camera frame error: {ex.Message}");
             }
+        }
+        finally
+        {
+            Volatile.Write(ref _frameBusy, 0);
         }
     }
 

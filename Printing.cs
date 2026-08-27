@@ -227,7 +227,7 @@ public static class Printing
 """;
     }
 
-    private static void HtmlToPdf(string htmlPath, string pdfPath)
+    internal static void HtmlToPdf(string htmlPath, string pdfPath)
     {
         var browser = FindBrowser() ?? throw new InvalidOperationException(
             "No Chromium-based browser found for PDF conversion. On Windows, Microsoft Edge should be preinstalled.");
@@ -289,8 +289,38 @@ public static class Printing
         return candidates.FirstOrDefault(File.Exists);
     }
 
+    /// <summary>Maps the kiosk's PRINT_DUPLEX value to the driver
+    /// setting: "long" = book-style long-edge flip, "short" = short
+    /// edge.</summary>
+    internal static System.Drawing.Printing.Duplex ToDuplex(string duplex) =>
+        duplex == "short"
+            ? System.Drawing.Printing.Duplex.Horizontal
+            : System.Drawing.Printing.Duplex.Vertical;
+
+    /// <summary>True for "printers" that create a file instead of paper
+    /// (they pop a save dialog — the exact opposite of a kiosk).</summary>
+    internal static bool IsVirtualPrinter(string name) =>
+        new[] { "Microsoft Print to PDF", "Microsoft XPS", "OneNote", "Adobe PDF", "Fax" }
+            .Any(v => name.Contains(v, StringComparison.OrdinalIgnoreCase));
+
+    private static string? DefaultPrinterName()
+    {
+        try { return new System.Drawing.Printing.PrinterSettings().PrinterName; }
+        catch { return null; }
+    }
+
     private static void DispatchToPrinter(string pdfPath, KioskConfig cfg)
     {
+        // A file-making "printer" (Microsoft Print to PDF, Adobe PDF,
+        // XPS, OneNote, Fax) would open a save dialog at the station no
+        // matter which path spools the job — refuse up front with the
+        // fix spelled out, instead of stranding a student at a dialog.
+        var target = cfg.PrinterName ?? DefaultPrinterName();
+        if (target is not null && IsVirtualPrinter(target))
+            throw new InvalidOperationException(
+                $"The target printer \"{target}\" creates a file instead of printing on paper, which opens a save dialog at the kiosk. " +
+                "Make the classroom printer the Windows default (Settings > Bluetooth & devices > Printers & scanners), or set PRINTER_NAME in .env.");
+
         // Preferred: SumatraPDF prints fully silently and blocks until the
         // job is spooled, so the temp file can be deleted right after.
         if (FindSumatra(cfg.SumatraPath) is { } sumatra)
@@ -319,10 +349,25 @@ public static class Printing
             proc.WaitForExit(120_000);
             if (proc.ExitCode != 0)
                 throw new InvalidOperationException($"SumatraPDF reported a print failure (exit {proc.ExitCode})");
+            KioskLog.Info("Printed via SumatraPDF.");
             return;
         }
 
-        // Fallback: hand the PDF to the default print handler via the
+        // No Sumatra: print with the in-box Windows PDF engine — fully
+        // silent, no helper app, present on every Windows 10/11 device.
+        try
+        {
+            PdfRasterPrinter.Print(pdfPath, cfg.PrinterName, cfg.Duplex);
+            KioskLog.Info("Printed via the built-in Windows PDF engine (no helper app needed).");
+            return;
+        }
+        catch (Exception ex)
+        {
+            KioskLog.Warn($"Built-in PDF printing failed ({ex.Message}) — handing the file to the system's PDF app as a last resort. " +
+                "That app may open a window (e.g. Adobe Acrobat) and need clicks; installing SumatraPDF restores fully silent printing.");
+        }
+
+        // Last resort: hand the PDF to the default print handler via the
         // Windows shell "print" verb. Wait so the temp file is not deleted
         // out from under the handler.
         var verb = new ProcessStartInfo(pdfPath) { UseShellExecute = true, Verb = "print", CreateNoWindow = true };

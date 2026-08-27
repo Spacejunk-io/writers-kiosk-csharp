@@ -148,10 +148,17 @@ key header instead.
    OpenAI). Every optional setting (`CAMERA_INDEX`, `PRINT_DUPLEX`,
    `FLIP_VERTICAL`, `WINDOW_X/Y`, `COOLDOWN_SECONDS`, `ENHANCE`,
    `ASSIGNMENT_FILE`, …) is documented in `.env.example`.
-3. Optional but recommended: install [SumatraPDF](https://www.sumatrapdf.org)
-   for fully silent (and duplex) printing; without it the default
-   Windows PDF handler is used. Microsoft Edge (preinstalled) performs
-   the PDF conversion.
+3. Printing needs **no installs**: Microsoft Edge (preinstalled)
+   converts the report to PDF, and the kiosk prints it silently — via
+   [SumatraPDF](https://www.sumatrapdf.org) when installed (preferred:
+   vector-sharp and fastest), otherwise through **Windows' built-in PDF
+   engine**, which every Windows 10/11 device already has. Only if both
+   fail does the kiosk hand the file to the system's default PDF app
+   (which may open a window, e.g. Acrobat). If the Windows *default
+   printer* is a file-maker ("Microsoft Print to PDF", "Adobe PDF"), the
+   kiosk refuses with instructions instead of stranding a student at a
+   save dialog — set the classroom printer as default, or `PRINTER_NAME`
+   in `.env`.
 4. Run:
 
 ```bash
@@ -184,6 +191,7 @@ writers-kiosk-csharp/
 ├── Profiles.cs              named teacher profiles (kiosk-profiles.json)
 ├── LlmClient.cs             system prompt & OpenAI/Azure vision request
 ├── Printing.cs              Markdown → HTML → PDF → printer; 2-col layout
+├── PdfRasterPrinter.cs      silent printing via Windows' built-in PDF engine
 ├── ImageOps.cs              enhancement (AWB/exposure) & JPEG encoding
 ├── KioskLog.cs              in-app activity log & session counters
 ├── LogWindow.cs             Activity Log window (Reports menu / L key)
@@ -226,6 +234,7 @@ warnings promoted to errors.
 | 1.4.0 | Safety notices for mandated-reporting support (dormant until district-configured) |
 | 1.5.0 | Grade 6–12 + five-band response calibration; bilingual option for multilingual learners in any subject |
 | 1.6.0 | Teacher profiles (named presets, auto-loaded at launch); two-column bilingual print layout; console window replaced by in-app Activity Log; blank-page enhancement fix; xUnit test suite + CI |
+| 1.6.1 | Install-free silent printing via Windows' built-in PDF engine (no more Acrobat fallback on machines without SumatraPDF); file-making "printers" refused with instructions instead of a save dialog; camera frames dropped instead of queued when processing lags |
 
 ## License
 
