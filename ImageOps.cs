@@ -96,6 +96,12 @@ public sealed class Enhancer
             if (cum <= pLow) low = v;
             if (cum <= pHigh) high = v;
         }
+        // A frame that is almost entirely bright paper (a blank page
+        // filling the camera) has its 2nd percentile up near white;
+        // using that as the black point would crush the whole page
+        // toward black. Cap the black anchor so bright pages stay
+        // bright and only genuinely dark regions stretch down.
+        low = Math.Min(low, 64);
         // Near-flat image (e.g. lens covered): don't amplify noise.
         var stretch = high > low + 24 ? Math.Min(235f / (high - low), 2.2f) : 1f;
 
