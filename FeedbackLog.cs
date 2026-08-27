@@ -22,6 +22,9 @@ public static class FeedbackLog
         {
             Directory.CreateDirectory(Folder);
             var path = Path.Combine(Folder, DateTime.Now.ToString("yyyy-MM-dd") + ".md");
+            // The two-column print marker is an internal delimiter; in
+            // the review log it reads better as a plain divider.
+            markdown = markdown.Replace(LlmClient.ColumnBreak, "*— translation —*");
             var entry = $"\n\n## {DateTime.Now:h:mm tt} — {subject}\n\n{markdown}\n\n---\n";
             if (!File.Exists(path))
                 entry = $"# Writer's Kiosk feedback log — {DateTime.Now:MMMM d, yyyy}\n\n" +
