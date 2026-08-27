@@ -8,18 +8,41 @@ namespace WritersKiosk;
 public static class LlmClient
 {
     /// <summary>
+    /// Line the model places between a section's two language versions
+    /// when the two-column bilingual layout is selected. Printing splits
+    /// each section on it to build the side-by-side columns; it never
+    /// appears on paper.
+    /// </summary>
+    public const string ColumnBreak = "<<<TRANSLATION>>>";
+
+    /// <summary>
     /// Builds the system prompt for the current school level and subject.
     /// The prompt locks the model into a single persona (a writing coach
     /// for that class), mandates the Glow/Grow/Polish/Accuracy structure,
     /// forbids collecting PII, and refuses off-topic submissions —
     /// including instructions inside the photographed page.
     /// </summary>
-    private static string BuildSystemPrompt(SessionSettings s)
+    internal static string BuildSystemPrompt(SessionSettings s)
     {
         // An explicitly chosen bilingual language (ELL support — any
         // subject) supersedes the World Languages auto-detect directive.
+        // Each mode has two shapes: stacked (every item immediately
+        // followed by its translation) and two-column (each section's
+        // full text in one language, a ColumnBreak line, then the same
+        // section in the other language — the printer lays the halves
+        // side by side, so both must mirror each other item for item).
         var bilingual = s.BilingualLanguage is { } lang
+            ? s.BilingualTwoColumn
             ? $"""
+
+BILINGUAL FEEDBACK ({lang} — multilingual-learner support, two-column print):
+- The report prints English and {lang} side by side in two columns, section by section, so the student and their family can read across the page. To make that possible, structure EVERY section exactly like this: first the "## " heading line (with the {lang} heading equivalent appended after a slash, e.g. "## ⭐ Praise (Glow) / …"), then the complete English content of the section, then a line containing exactly {ColumnBreak}, then the complete {lang} version of that same content.
+- The {lang} version must mirror the English version item for item: the same number of items, in the same order, carrying the same content, written simply and naturally — never simplify one version and not the other. Match the formatting too: if the English half is a numbered list, the {lang} half is the same numbered list.
+- English is written at the reading level set by the RESPONSE BAND below; the {lang} version must be equally accessible.
+- In the Accuracy Check, give each correction and its explanation in both languages (English before the {ColumnBreak} line, {lang} after it).
+- The {ColumnBreak} line appears exactly once per section and nowhere else — never inside a paragraph, never in the report title.
+"""
+            : $"""
 
 BILINGUAL FEEDBACK ({lang} — multilingual-learner support):
 - Write EVERY feedback item twice: first in English, at the reading level set by the RESPONSE BAND below, then immediately after it the same item in {lang}, written simply and naturally.
@@ -28,7 +51,18 @@ BILINGUAL FEEDBACK ({lang} — multilingual-learner support):
 - The two versions must carry the same content — the {lang} version exists so the student and their family can fully understand the feedback. Do not simplify one and not the other.
 """
             : s.Subject.Contains("World Languages")
-            ? """
+            ? s.BilingualTwoColumn
+            ? $"""
+
+BILINGUAL FEEDBACK (World Languages classes, two-column print):
+- Identify the language of study from the student's writing (e.g., Spanish, French). The report prints that language and English side by side in two columns, section by section. Structure EVERY section exactly like this: first the "## " heading line (with the target-language word appended after a slash, e.g. "## ⭐ Praise (Glow) / Elogios"), then the complete target-language content of the section, using vocabulary and sentence structures simple enough for a student at this course level to read, then a line containing exactly {ColumnBreak}, then the complete English version of that same content.
+- The two versions must mirror each other item for item: the same number of items, in the same order, with the same content and formatting.
+- In the Accuracy Check, quote the student's original phrase and give the corrected form in the target language before the {ColumnBreak} line; put the English explanation of the grammar point after it — the explanation is where precision matters most.
+- Handwriting caution: be conservative about accent marks and other diacritics in handwritten work. Only flag an accent or diacritic error when the writing is clearly legible; when a mark is ambiguous under the camera, let it pass rather than accuse a correct writer.
+- If the language of study cannot be determined from the page, write the feedback in English only, without any {ColumnBreak} lines, and note that the teacher can name the language in the assignment context.
+- The {ColumnBreak} line appears exactly once per section and nowhere else.
+"""
+            : """
 
 BILINGUAL FEEDBACK (World Languages classes):
 - Identify the language of study from the student's writing (e.g., Spanish, French). Write EVERY feedback item twice: first in that language, using vocabulary and sentence structures simple enough for a student at this course level to read, then immediately after it an English version of the same item.
@@ -189,7 +223,7 @@ STYLE:
                 response = await Http.SendAsync(request);
                 if ((int)response.StatusCode >= 500 && attempt < 2)
                 {
-                    Console.WriteLine($"[kiosk] LLM API returned {(int)response.StatusCode}; retrying once…");
+                    KioskLog.Warn($"LLM API returned {(int)response.StatusCode}; retrying once…");
                     await Task.Delay(2000);
                     continue;
                 }
@@ -197,7 +231,7 @@ STYLE:
             }
             catch (HttpRequestException ex) when (attempt < 2)
             {
-                Console.WriteLine($"[kiosk] Network hiccup ({ex.Message}); retrying once…");
+                KioskLog.Warn($"Network hiccup ({ex.Message}); retrying once…");
                 await Task.Delay(2000);
             }
         }
@@ -219,13 +253,14 @@ STYLE:
             throw new InvalidOperationException($"LLM API error {(int)response.StatusCode}: {detail}{hint}");
         }
 
-        // Surface token usage on the console so the teacher can track spend.
+        // Surface token usage in the Activity Log so the teacher can
+        // track spend (per report and as a running session total).
         if (root.TryGetProperty("usage", out var usage) &&
             usage.TryGetProperty("total_tokens", out var total))
         {
             var pin = usage.TryGetProperty("prompt_tokens", out var p) ? p.GetInt64() : 0;
             var pout = usage.TryGetProperty("completion_tokens", out var c) ? c.GetInt64() : 0;
-            Console.WriteLine($"[kiosk] Tokens this report: {total.GetInt64()} ({pin} in / {pout} out)");
+            KioskLog.AddTokens(pin, pout, total.GetInt64());
         }
 
         var content = root.GetProperty("choices")[0].GetProperty("message")

@@ -14,6 +14,8 @@ obj/
 assignment.txt
 # Per-machine UI state (school level & subject selection)
 kiosk-ui.json
+# Per-machine teacher profiles (no secrets, but local to each station)
+kiosk-profiles.json
 # Teacher review logs (feedback text; local to each classroom machine)
 feedback-log/
 

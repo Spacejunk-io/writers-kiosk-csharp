@@ -134,6 +134,12 @@ public sealed class SessionSettings
     /// <summary>Home/partner language for bilingual feedback (ELL
     /// support), or null for English-only. Independent of subject.</summary>
     public string? BilingualLanguage { get; set; }
+    /// <summary>Bilingual print layout: true = the two languages side by
+    /// side in columns, each section starting level with its partner;
+    /// false = stacked, each item's translation directly under it.
+    /// Applies to the explicit bilingual mode and to World Languages
+    /// auto-detect alike.</summary>
+    public bool BilingualTwoColumn { get; set; } = true;
     public string? AssignmentContext { get; set; }
 
     public string LevelPhrase => Level == Subjects.High ? "high school" : "middle school";
@@ -142,14 +148,16 @@ public sealed class SessionSettings
     public string BandDisplay => Bands.Display(Band);
     public string BandGuidance => Bands.Guidance(Band);
 
-    public static SessionSettings Load(KioskConfig cfg)
+    public static SessionSettings Load(KioskConfig cfg) => Load(cfg.AssignmentContext, UiFile);
+
+    internal static SessionSettings Load(string? assignmentContext, string uiFile)
     {
-        var settings = new SessionSettings { AssignmentContext = cfg.AssignmentContext };
+        var settings = new SessionSettings { AssignmentContext = assignmentContext };
         try
         {
-            if (File.Exists(UiFile))
+            if (File.Exists(uiFile))
             {
-                using var doc = JsonDocument.Parse(File.ReadAllText(UiFile));
+                using var doc = JsonDocument.Parse(File.ReadAllText(uiFile));
                 var root = doc.RootElement;
                 var level = root.GetProperty("level").GetString();
                 var subject = root.GetProperty("subject").GetString();
@@ -168,6 +176,9 @@ public sealed class SessionSettings
                 if (root.TryGetProperty("bilingual", out var bl) &&
                     bl.GetString() is { Length: > 0 } lang)
                     settings.BilingualLanguage = lang;
+                if (root.TryGetProperty("columns", out var cols) &&
+                    (cols.ValueKind is JsonValueKind.True or JsonValueKind.False))
+                    settings.BilingualTwoColumn = cols.GetBoolean();
                 // Keep grade consistent with level after loading.
                 settings.Grade = settings.Level == Subjects.High
                     ? Math.Clamp(settings.Grade, 9, 12)
@@ -178,19 +189,34 @@ public sealed class SessionSettings
         return settings;
     }
 
-    public void SaveUiState()
+    public void SaveUiState(string uiFile = UiFile)
     {
         try
         {
-            File.WriteAllText(UiFile, JsonSerializer.Serialize(new
+            File.WriteAllText(uiFile, JsonSerializer.Serialize(new
             {
                 level = Level,
                 subject = Subject,
                 grade = Grade,
                 band = Band,
                 bilingual = BilingualLanguage,
+                columns = BilingualTwoColumn,
             }));
         }
         catch { /* read-only folder: selection just won't persist */ }
+    }
+
+    /// <summary>Applies a saved profile's presets to this session. The
+    /// assignment context is deliberately untouched — it belongs to the
+    /// day (assignment.txt), not to the profile.</summary>
+    public void ApplyProfile(KioskProfile profile)
+    {
+        profile.Sanitize();
+        Level = profile.Level;
+        Subject = profile.Subject;
+        Grade = profile.Grade;
+        Band = profile.Band;
+        BilingualLanguage = profile.Bilingual;
+        BilingualTwoColumn = profile.BilingualTwoColumn;
     }
 }

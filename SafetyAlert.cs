@@ -32,8 +32,9 @@ public static class SafetyAlert
     public static async Task RaiseAsync(KioskConfig cfg, string subject)
     {
         var stamp = DateTime.Now;
-        Console.Error.WriteLine(
-            $"[kiosk] SAFETY NOTICE {stamp:h:mm tt}: a submission was flagged as a possible safety concern. " +
+        KioskLog.CountSafety();
+        KioskLog.Warn(
+            $"SAFETY NOTICE {stamp:h:mm tt}: a submission was flagged as a possible safety concern. " +
             "The student was asked to bring the page to the teacher. Follow school protocol. " +
             "(No content or identity is stored or transmitted.)");
 
@@ -51,7 +52,7 @@ public static class SafetyAlert
 
         if (cfg.SafetyWebhookUrl is null)
         {
-            Console.WriteLine("[kiosk] (No SAFETY_WEBHOOK_URL configured — no staff notification was sent beyond this console.)");
+            KioskLog.Info("(No SAFETY_WEBHOOK_URL configured — no staff notification was sent beyond this log.)");
             return;
         }
 
@@ -69,13 +70,14 @@ public static class SafetyAlert
             var response = await Http.PostAsync(
                 cfg.SafetyWebhookUrl,
                 new StringContent(payload, Encoding.UTF8, "application/json"));
-            Console.WriteLine(response.IsSuccessStatusCode
-                ? "[kiosk] Safety alert delivered to the district notification flow."
-                : $"[kiosk] Safety alert POST returned {(int)response.StatusCode} — notify staff manually.");
+            if (response.IsSuccessStatusCode)
+                KioskLog.Info("Safety alert delivered to the district notification flow.");
+            else
+                KioskLog.Warn($"Safety alert POST returned {(int)response.StatusCode} — notify staff manually.");
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[kiosk] Safety alert could not be delivered ({ex.Message}) — notify staff manually.");
+            KioskLog.Warn($"Safety alert could not be delivered ({ex.Message}) — notify staff manually.");
         }
     }
 }

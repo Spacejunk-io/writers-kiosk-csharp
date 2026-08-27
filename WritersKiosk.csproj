@@ -1,10 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- Console Exe (not WinExe) on purpose: the console window shows the
-         kiosk log (camera list, cooldowns, token usage), like the Rust
-         original. -->
-    <OutputType>Exe</OutputType>
+    <!-- WinExe: no console window in the classroom. Everything the old
+         console showed (camera list, cooldowns, token usage, declines)
+         lives in the in-app Activity Log (Reports menu, or the L key). -->
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,7 +12,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>writers-kiosk</AssemblyName>
     <ApplicationIcon>assets\icon.ico</ApplicationIcon>
-    <Version>1.5.0</Version>
+    <Version>1.6.0</Version>
     <Company>Spacejunk-IO</Company>
     <Product>Writer's Kiosk</Product>
     <Authors>Spacejunk-io — George Bacon</Authors>
@@ -24,6 +24,15 @@
 
   <ItemGroup>
     <None Include="assets\icon.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The test project lives in tests\ and must not be swept into
+         this project's default compile glob. -->
+    <Compile Remove="tests\**" />
+    <None Remove="tests\**" />
+    <!-- Pure-logic internals are visible to the test suite. -->
+    <InternalsVisibleTo Include="WritersKiosk.Tests" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,5 +1,7 @@
 // Writer's Kiosk (C#) — Markdown → HTML → PDF → printer. GPL-3.0-or-later.
 using System.Diagnostics;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace WritersKiosk;
 
@@ -14,7 +16,7 @@ public static class Printing
     /// </summary>
     public static void PrintMarkdown(string markdown, KioskConfig cfg, string subject)
     {
-        var htmlBody = Markdig.Markdown.ToHtml(markdown);
+        var htmlBody = RenderBody(markdown);
         var page = WrapInPage(htmlBody, subject);
 
         var stamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -34,7 +36,133 @@ public static class Printing
         }
     }
 
-    private static string WrapInPage(string body, string subject)
+    /// <summary>
+    /// Markdown → HTML body. A report carrying the bilingual
+    /// <see cref="LlmClient.ColumnBreak"/> marker is laid out in two
+    /// side-by-side columns; anything else renders normally. The
+    /// markdown itself says which, so a reprint always matches the
+    /// original layout.
+    /// </summary>
+    internal static string RenderBody(string markdown) =>
+        markdown.Contains(LlmClient.ColumnBreak)
+            ? RenderTwoColumn(markdown)
+            : Markdig.Markdown.ToHtml(markdown);
+
+    /// <summary>
+    /// Two-column bilingual layout. Each "## " section whose body holds
+    /// exactly one ColumnBreak becomes a full-width heading plus a
+    /// two-column table: first language left, second language right.
+    /// Because every section heading spans the page, Praise, Questions,
+    /// Polish, and the Accuracy Check each begin at the same point in
+    /// both languages — paragraph lengths may drift within a section
+    /// (translations differ), and that drift stays visible and easy to
+    /// follow. When both halves contain the same number of items, the
+    /// items themselves are paired row by row, so paragraphs sit
+    /// roughly side by side too. Sections without the marker (title,
+    /// or a section the model wrote once) render full-width unchanged.
+    /// </summary>
+    internal static string RenderTwoColumn(string markdown)
+    {
+        var html = new StringBuilder();
+        foreach (var (heading, body) in SplitSections(markdown))
+        {
+            var raw = heading is null ? body : heading + "\n" + body;
+            var halves = body.Split(LlmClient.ColumnBreak);
+            if (halves.Length != 2)
+            {
+                // No marker (or a malformed extra one): render as-is,
+                // minus any stray marker text — it must never print.
+                html.Append(Markdig.Markdown.ToHtml(raw.Replace(LlmClient.ColumnBreak, "")));
+                continue;
+            }
+
+            if (heading is not null)
+                html.Append(Markdig.Markdown.ToHtml(heading));
+            html.Append("<table class=\"cols\">");
+            var left = SplitBlocks(halves[0]);
+            var right = SplitBlocks(halves[1]);
+            if (left.Count == right.Count && left.Count > 1)
+            {
+                // Same item count on both sides: pair item with item.
+                for (var i = 0; i < left.Count; i++)
+                    html.Append("<tr><td>").Append(Markdig.Markdown.ToHtml(left[i]))
+                        .Append("</td><td>").Append(Markdig.Markdown.ToHtml(right[i]))
+                        .Append("</td></tr>");
+            }
+            else
+            {
+                html.Append("<tr><td>").Append(Markdig.Markdown.ToHtml(halves[0].Trim()))
+                    .Append("</td><td>").Append(Markdig.Markdown.ToHtml(halves[1].Trim()))
+                    .Append("</td></tr>");
+            }
+            html.Append("</table>");
+        }
+        return html.ToString();
+    }
+
+    /// <summary>Splits a report at its "## " headings. The first tuple
+    /// (heading null) is everything before the first section — the
+    /// report title and any preamble.</summary>
+    internal static List<(string? Heading, string Body)> SplitSections(string markdown)
+    {
+        var sections = new List<(string?, string)>();
+        string? heading = null;
+        var body = new StringBuilder();
+        foreach (var line in markdown.Replace("\r\n", "\n").Split('\n'))
+        {
+            if (line.StartsWith("## "))
+            {
+                if (heading is not null || body.ToString().Trim().Length > 0)
+                    sections.Add((heading, body.ToString()));
+                heading = line;
+                body.Clear();
+            }
+            else
+            {
+                body.AppendLine(line);
+            }
+        }
+        if (heading is not null || body.ToString().Trim().Length > 0)
+            sections.Add((heading, body.ToString()));
+        return sections;
+    }
+
+    private static readonly Regex ListItemStart =
+        new(@"^\s{0,3}([-*+]|\d{1,3}[.)])\s", RegexOptions.Compiled);
+
+    /// <summary>Splits section content into its top-level blocks: each
+    /// list item (with its continuation lines) or blank-line-separated
+    /// paragraph is one block.</summary>
+    internal static List<string> SplitBlocks(string markdown)
+    {
+        var blocks = new List<string>();
+        var current = new StringBuilder();
+        var afterBlank = true;
+
+        void Flush()
+        {
+            var text = current.ToString().Trim();
+            if (text.Length > 0) blocks.Add(text);
+            current.Clear();
+        }
+
+        foreach (var line in markdown.Replace("\r\n", "\n").Split('\n'))
+        {
+            if (line.Trim().Length == 0)
+            {
+                afterBlank = true;
+                continue;
+            }
+            if (ListItemStart.IsMatch(line) || afterBlank)
+                Flush();
+            current.AppendLine(line);
+            afterBlank = false;
+        }
+        Flush();
+        return blocks;
+    }
+
+    internal static string WrapInPage(string body, string subject)
     {
         var date = DateTime.Now.ToString("MMMM d, yyyy");
         return $$"""
@@ -67,6 +195,20 @@ public static class Printing
     font-style: italic;
   }
   .meta { color: #555; font-size: 10pt; margin-bottom: 14px; }
+  /* Bilingual two-column layout: each section heading spans the page,
+     then the two languages sit side by side with a thin divider. */
+  table.cols { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  table.cols tr { page-break-inside: avoid; }
+  table.cols td {
+    width: 50%;
+    vertical-align: top;
+    font-size: 11pt;
+    line-height: 1.45;
+    padding: 2px 0 2px 12px;
+  }
+  table.cols td:first-child { padding: 2px 12px 2px 0; border-right: 1px solid #bbb; }
+  table.cols p, table.cols ul, table.cols ol { margin: 0 0 6px 0; }
+  table.cols ul, table.cols ol { padding-left: 1.25em; }
   .footer {
     margin-top: 28px;
     padding-top: 8px;

@@ -6,17 +6,18 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        // Windowed app — there is no console, so a startup failure
+        // (bad .env, missing key) must surface as a dialog.
+        ApplicationConfiguration.Initialize();
         try
         {
             var config = KioskConfig.Load();
-            ApplicationConfiguration.Initialize();
             Application.Run(new KioskForm(config));
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"\n[Writer's Kiosk] Startup error: {ex.Message}");
-            Console.Error.WriteLine("Press Enter to close.");
-            Console.ReadLine();
+            MessageBox.Show(ex.Message, "Writer's Kiosk — startup error",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
             Environment.Exit(1);
         }
     }

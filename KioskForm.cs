@@ -15,10 +15,17 @@ public sealed class KioskForm : Form
     private readonly KioskConfig _cfg;
     private readonly EntraTokenProvider? _entra;
     private readonly SessionSettings _session;
+    private readonly ProfileStore _profiles;
+    private readonly int _startupCameraIndex;
     private ToolStripMenuItem _middleMenu = null!;
     private ToolStripMenuItem _highMenu = null!;
     private ToolStripMenuItem _gradeBandMenu = null!;
     private ToolStripMenuItem _bilingualMenu = null!;
+    private ToolStripMenuItem _twoColumnItem = null!;
+    private ToolStripMenuItem _profilesMenu = null!;
+    private Font _menuFontRegular = null!;
+    private Font _menuFontBold = null!;
+    private LogWindow? _logWindow;
 
     private static readonly string[] BilingualLanguages =
     [
@@ -55,11 +62,25 @@ public sealed class KioskForm : Form
     {
         _cfg = cfg;
         _session = SessionSettings.Load(cfg);
+
+        // The active profile's presets win at every launch, so the
+        // station always opens in the state the teacher chose. With no
+        // active profile, the last session's settings carry over as
+        // before. The daily assignment always comes from assignment.txt.
+        _profiles = ProfileStore.Load();
+        var startup = _profiles.ActiveProfile;
+        if (startup is not null)
+        {
+            _session.ApplyProfile(startup);
+            _session.SaveUiState();
+        }
+
         if (cfg.Provider == Provider.Azure && cfg.AzureUseEntra)
             _entra = new EntraTokenProvider(cfg.AzureTenantId, cfg.AzureClientId);
-        _enhancer = new Enhancer(cfg.Enhance);
-        _flipV = cfg.FlipVertical;
-        _flipH = cfg.FlipHorizontal;
+        _enhancer = new Enhancer(startup?.Enhance ?? cfg.Enhance);
+        _flipV = startup?.FlipVertical ?? cfg.FlipVertical;
+        _flipH = startup?.FlipHorizontal ?? cfg.FlipHorizontal;
+        _startupCameraIndex = startup?.CameraIndex ?? cfg.CameraIndex;
 
         Text = TitleReady;
         KeyPreview = true;
@@ -75,17 +96,22 @@ public sealed class KioskForm : Form
             Location = pos;
         }
         if (cfg.AssignmentContext is not null)
-            Console.WriteLine("[kiosk] Loaded teacher assignment context from assignment.txt.");
-        Console.WriteLine($"[kiosk] Feedback tuned for: grade {_session.Grade} {_session.Subject}, {_session.BandDisplay}" +
+            KioskLog.Info("Loaded teacher assignment context from assignment.txt.");
+        if (startup is not null)
+            KioskLog.Info($"Startup profile \"{startup.Name}\" applied.");
+        KioskLog.Info($"Feedback tuned for: grade {_session.Grade} {_session.Subject}, {_session.BandDisplay}" +
             (_session.BilingualLanguage is { } bl ? $", bilingual English + {bl}" : "") +
             " (change via the menu bar).");
     }
 
-    // ── Menu bar: Assignment · Middle School · High School · Help ─────
+    // ── Menu bar: Assignment · Middle School · High School ·
+    //    Grade & Band · Bilingual · Profiles · Reports · Help ─────────
 
     private void BuildMenu()
     {
         var menu = new MenuStrip();
+        _menuFontRegular = menu.Font;
+        _menuFontBold = new Font(_menuFontRegular, FontStyle.Bold);
 
         var assignment = new ToolStripMenuItem("Assignment");
         assignment.DropDownItems.Add(new ToolStripMenuItem(
@@ -104,6 +130,8 @@ public sealed class KioskForm : Form
         var reports = new ToolStripMenuItem("Reports");
         reports.DropDownItems.Add(new ToolStripMenuItem(
             "Reprint Last Report  (R)", null, (_, _) => ReprintLast()));
+        reports.DropDownItems.Add(new ToolStripMenuItem(
+            "Activity Log…  (L)", null, (_, _) => ShowActivityLog()));
         reports.DropDownItems.Add(new ToolStripMenuItem(
             "Open Feedback Log Folder", null, (_, _) => OpenLogFolder()));
 
@@ -135,13 +163,20 @@ public sealed class KioskForm : Form
         _bilingualMenu.DropDownItems.Add(new ToolStripSeparator());
         _bilingualMenu.DropDownItems.Add(new ToolStripMenuItem(
             "Other Language…", null, (_, _) => ChooseCustomLanguage()));
+        _bilingualMenu.DropDownItems.Add(new ToolStripSeparator());
+        _twoColumnItem = new ToolStripMenuItem(
+            "Two-Column Layout (languages side by side)", null, (_, _) => ToggleTwoColumn());
+        _bilingualMenu.DropDownItems.Add(_twoColumnItem);
+
+        _profilesMenu = new ToolStripMenuItem("Profiles");
+        RebuildProfilesMenu();
 
         var help = new ToolStripMenuItem("Help && Support");
         help.DropDownItems.Add(new ToolStripMenuItem("Help", null, (_, _) => ShowHelp()));
         help.DropDownItems.Add(new ToolStripMenuItem("Hotkeys", null, (_, _) => ShowHotkeys()));
         help.DropDownItems.Add(new ToolStripMenuItem("About", null, (_, _) => ShowAbout()));
 
-        menu.Items.AddRange([assignment, _middleMenu, _highMenu, _gradeBandMenu, _bilingualMenu, reports, help]);
+        menu.Items.AddRange([assignment, _middleMenu, _highMenu, _gradeBandMenu, _bilingualMenu, _profilesMenu, reports, help]);
         MainMenuStrip = menu;
         Controls.Add(menu);
         _view.BringToFront();
@@ -159,7 +194,7 @@ public sealed class KioskForm : Form
             : Math.Clamp(_session.Grade, 6, 8);
         _session.SaveUiState();
         RefreshSubjectChecks();
-        Console.WriteLine($"[kiosk] Feedback now tuned for: grade {_session.Grade} {subject}, {_session.BandDisplay}.");
+        KioskLog.Info($"Feedback now tuned for: grade {_session.Grade} {subject}, {_session.BandDisplay}.");
     }
 
     /// <summary>Grade choice; the school level follows the grade, and the
@@ -177,7 +212,7 @@ public sealed class KioskForm : Form
         }
         _session.SaveUiState();
         RefreshSubjectChecks();
-        Console.WriteLine($"[kiosk] Feedback now tuned for: grade {grade} {_session.Subject}, {_session.BandDisplay}.");
+        KioskLog.Info($"Feedback now tuned for: grade {grade} {_session.Subject}, {_session.BandDisplay}.");
     }
 
     private void SelectBand(string bandKey)
@@ -185,7 +220,7 @@ public sealed class KioskForm : Form
         _session.Band = bandKey;
         _session.SaveUiState();
         RefreshSubjectChecks();
-        Console.WriteLine($"[kiosk] Response band: {_session.BandDisplay}.");
+        KioskLog.Info($"Response band: {_session.BandDisplay}.");
     }
 
     private void SelectBilingual(string? language)
@@ -193,16 +228,35 @@ public sealed class KioskForm : Form
         _session.BilingualLanguage = language;
         _session.SaveUiState();
         RefreshSubjectChecks();
-        Console.WriteLine(language is null
-            ? "[kiosk] Bilingual feedback off — English only."
-            : $"[kiosk] Bilingual feedback on: English + {language}.");
+        KioskLog.Info(language is null
+            ? "Bilingual feedback off — English only."
+            : $"Bilingual feedback on: English + {language} ({(_session.BilingualTwoColumn ? "two-column" : "stacked")} layout).");
+    }
+
+    private void ToggleTwoColumn()
+    {
+        _session.BilingualTwoColumn = !_session.BilingualTwoColumn;
+        _session.SaveUiState();
+        RefreshSubjectChecks();
+        KioskLog.Info(_session.BilingualTwoColumn
+            ? "Bilingual layout: two columns, languages side by side — each section starts level in both languages."
+            : "Bilingual layout: stacked — each item followed directly by its translation.");
     }
 
     private void ChooseCustomLanguage()
     {
+        if (PromptForText("Bilingual feedback — other language",
+                "Language name (in English), e.g. \"Amharic\":", "") is { } lang)
+            SelectBilingual(lang);
+    }
+
+    /// <summary>One-line text prompt dialog. Returns the trimmed text,
+    /// or null on cancel/empty.</summary>
+    private string? PromptForText(string title, string label, string initial)
+    {
         using var dialog = new Form
         {
-            Text = "Bilingual feedback — other language",
+            Text = title,
             ClientSize = new Size(420, 110),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
@@ -210,19 +264,201 @@ public sealed class KioskForm : Form
             MaximizeBox = false,
             ShowIcon = false,
         };
-        var label = new Label { Text = "Language name (in English), e.g. \"Amharic\":", Dock = DockStyle.Top, Height = 24, Padding = new Padding(8, 6, 8, 0) };
-        var box = new TextBox { Dock = DockStyle.Top, Font = new Font("Segoe UI", 10f), Margin = new Padding(8) };
+        var caption = new Label { Text = label, Dock = DockStyle.Top, Height = 24, Padding = new Padding(8, 6, 8, 0) };
+        var box = new TextBox { Dock = DockStyle.Top, Font = new Font("Segoe UI", 10f), Margin = new Padding(8), Text = initial };
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, Height = 40, Padding = new Padding(6) };
         var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Width = 80 };
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 80 };
         buttons.Controls.AddRange([ok, cancel]);
         dialog.Controls.Add(box);
-        dialog.Controls.Add(label);
+        dialog.Controls.Add(caption);
         dialog.Controls.Add(buttons);
         dialog.AcceptButton = ok;
         dialog.CancelButton = cancel;
-        if (dialog.ShowDialog(this) == DialogResult.OK && box.Text.Trim() is { Length: > 0 } lang)
-            SelectBilingual(lang);
+        box.SelectAll();
+        return dialog.ShowDialog(this) == DialogResult.OK && box.Text.Trim() is { Length: > 0 } text
+            ? text
+            : null;
+    }
+
+    // ── Profiles: named snapshots of every teacher-tunable setting ────
+
+    /// <summary>Snapshots the current teacher-tunable state under a
+    /// name. The daily assignment stays out on purpose (see Profiles.cs).</summary>
+    private KioskProfile CaptureProfile(string name)
+    {
+        bool flipV, flipH;
+        lock (_stateLock) { flipV = _flipV; flipH = _flipH; }
+        return new KioskProfile
+        {
+            Name = name,
+            Level = _session.Level,
+            Subject = _session.Subject,
+            Grade = _session.Grade,
+            Band = _session.Band,
+            Bilingual = _session.BilingualLanguage,
+            BilingualTwoColumn = _session.BilingualTwoColumn,
+            FlipVertical = flipV,
+            FlipHorizontal = flipH,
+            Enhance = _enhancer.Enabled,
+            CameraIndex = _camIndex,
+        };
+    }
+
+    private void RebuildProfilesMenu()
+    {
+        _profilesMenu.DropDownItems.Clear();
+        foreach (var p in _profiles.Profiles)
+        {
+            var profile = p;
+            _profilesMenu.DropDownItems.Add(new ToolStripMenuItem(
+                profile.Name, null, async (_, _) => await SelectProfileAsync(profile))
+            { Checked = _profiles.Active == profile.Name });
+        }
+        if (_profiles.Profiles.Count > 0)
+            _profilesMenu.DropDownItems.Add(new ToolStripSeparator());
+        _profilesMenu.DropDownItems.Add(new ToolStripMenuItem(
+            "No Startup Profile — reopen with last session's settings", null,
+            (_, _) => ClearActiveProfile())
+        { Checked = _profiles.Active is null });
+        _profilesMenu.DropDownItems.Add(new ToolStripSeparator());
+        _profilesMenu.DropDownItems.Add(new ToolStripMenuItem(
+            "Save Current Settings as New Profile…", null, (_, _) => SaveNewProfile()));
+        var active = _profiles.ActiveProfile;
+        _profilesMenu.DropDownItems.Add(new ToolStripMenuItem(
+            active is null ? "Update Active Profile with Current Settings" : $"Update \"{active.Name}\" with Current Settings",
+            null, (_, _) => UpdateActiveProfile())
+        { Enabled = active is not null });
+        _profilesMenu.DropDownItems.Add(new ToolStripMenuItem(
+            active is null ? "Rename Active Profile…" : $"Rename \"{active.Name}\"…",
+            null, (_, _) => RenameActiveProfile())
+        { Enabled = active is not null });
+        _profilesMenu.DropDownItems.Add(new ToolStripMenuItem(
+            active is null ? "Delete Active Profile…" : $"Delete \"{active.Name}\"…",
+            null, (_, _) => DeleteActiveProfile())
+        { Enabled = active is not null });
+        _profilesMenu.Font = _profiles.Active is null ? _menuFontRegular : _menuFontBold;
+    }
+
+    /// <summary>Applies a profile immediately and marks it as the
+    /// startup profile for future launches.</summary>
+    private async Task SelectProfileAsync(KioskProfile profile)
+    {
+        _session.ApplyProfile(profile);
+        _session.SaveUiState();
+        lock (_stateLock)
+        {
+            _flipV = profile.FlipVertical;
+            _flipH = profile.FlipHorizontal;
+        }
+        _enhancer.Enabled = profile.Enhance;
+        _profiles.Active = profile.Name;
+        _profiles.Save();
+        RefreshSubjectChecks();
+        RebuildProfilesMenu();
+        KioskLog.Info($"Profile \"{profile.Name}\" applied: grade {_session.Grade} {_session.Subject}, {_session.BandDisplay}" +
+            (_session.BilingualLanguage is { } bl ? $", bilingual English + {bl}" : "") +
+            ". It will also load at every launch.");
+
+        // Follow the profile's camera when possible; never mid-report.
+        if (profile.CameraIndex != _camIndex && !_busy && !_switching
+            && profile.CameraIndex < _descriptors.Count)
+        {
+            _switching = true;
+            try
+            {
+                await OpenCameraAsync(profile.CameraIndex);
+                _camIndex = profile.CameraIndex;
+                KioskLog.Info($"Now using camera {_camIndex}: {_descriptors[_camIndex].Name}");
+            }
+            catch (Exception ex)
+            {
+                KioskLog.Warn($"Profile camera {profile.CameraIndex} could not be opened: {ex.Message} — keeping the current camera.");
+            }
+            finally { _switching = false; }
+        }
+    }
+
+    private void ClearActiveProfile()
+    {
+        _profiles.Active = null;
+        _profiles.Save();
+        RebuildProfilesMenu();
+        KioskLog.Info("No startup profile — the kiosk will reopen with whatever settings were in use last.");
+    }
+
+    private void SaveNewProfile()
+    {
+        var name = PromptForText("Save profile", "Profile name, e.g. \"Period 3 — ELL Social Studies\":", "");
+        if (name is null) return;
+        var existing = _profiles.Profiles.FindIndex(p => p.Name == name);
+        if (existing >= 0 &&
+            MessageBox.Show(this, $"A profile named \"{name}\" already exists. Replace it?",
+                "Save profile", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+        var profile = CaptureProfile(name);
+        if (existing >= 0) _profiles.Profiles[existing] = profile;
+        else _profiles.Profiles.Add(profile);
+        _profiles.Active = name;
+        if (!_profiles.Save())
+            KioskLog.Warn($"Could not write {ProfileStore.FileName} — the profile exists for this session only.");
+        RebuildProfilesMenu();
+        KioskLog.Info($"Profile \"{name}\" saved with the current settings; it will load at every launch.");
+    }
+
+    private void UpdateActiveProfile()
+    {
+        if (_profiles.ActiveProfile is not { } active) return;
+        var index = _profiles.Profiles.IndexOf(active);
+        _profiles.Profiles[index] = CaptureProfile(active.Name);
+        _profiles.Save();
+        RebuildProfilesMenu();
+        KioskLog.Info($"Profile \"{active.Name}\" updated with the current settings.");
+    }
+
+    private void RenameActiveProfile()
+    {
+        if (_profiles.ActiveProfile is not { } active) return;
+        var name = PromptForText("Rename profile", "New name:", active.Name);
+        if (name is null || name == active.Name) return;
+        if (_profiles.Profiles.Any(p => p.Name == name))
+        {
+            MessageBox.Show(this, $"A profile named \"{name}\" already exists.",
+                "Rename profile", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        var oldName = active.Name;
+        active.Name = name;
+        _profiles.Active = name;
+        _profiles.Save();
+        RebuildProfilesMenu();
+        KioskLog.Info($"Profile \"{oldName}\" renamed to \"{name}\".");
+    }
+
+    private void DeleteActiveProfile()
+    {
+        if (_profiles.ActiveProfile is not { } active) return;
+        if (MessageBox.Show(this,
+                $"Delete profile \"{active.Name}\"? Current settings stay as they are; the kiosk will simply stop loading this profile at startup.",
+                "Delete profile", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+        _profiles.Profiles.Remove(active);
+        _profiles.Active = null;
+        _profiles.Save();
+        RebuildProfilesMenu();
+        KioskLog.Info($"Profile \"{active.Name}\" deleted.");
+    }
+
+    private void ShowActivityLog()
+    {
+        if (_logWindow is { IsDisposed: false })
+        {
+            _logWindow.Activate();
+            return;
+        }
+        _logWindow = new LogWindow();
+        _logWindow.FormClosed += (_, _) => _logWindow = null;
+        _logWindow.Show(this);
     }
 
     private void RefreshSubjectChecks()
@@ -230,7 +466,7 @@ public sealed class KioskForm : Form
         foreach (var (menu, level) in new[] { (_middleMenu, Subjects.Middle), (_highMenu, Subjects.High) })
         {
             var isActiveLevel = _session.Level == level;
-            menu.Font = new Font(menu.Font ?? Font, isActiveLevel ? FontStyle.Bold : FontStyle.Regular);
+            menu.Font = isActiveLevel ? _menuFontBold : _menuFontRegular;
             foreach (ToolStripMenuItem item in menu.DropDownItems)
                 item.Checked = isActiveLevel && item.Text == _session.Subject;
         }
@@ -242,7 +478,7 @@ public sealed class KioskForm : Form
         var current = _session.BilingualLanguage;
         foreach (var entry in _bilingualMenu.DropDownItems)
         {
-            if (entry is not ToolStripMenuItem item) continue;
+            if (entry is not ToolStripMenuItem item || item == _twoColumnItem) continue;
             item.Checked = current is null
                 ? item.Text == "Off — English only"
                 : item.Text == current;
@@ -252,8 +488,8 @@ public sealed class KioskForm : Form
             foreach (var entry in _bilingualMenu.DropDownItems)
                 if (entry is ToolStripMenuItem { Text: "Other Language…" } other)
                     other.Checked = true;
-        _bilingualMenu.Font = new Font(_bilingualMenu.Font ?? Font,
-            current is null ? FontStyle.Regular : FontStyle.Bold);
+        _twoColumnItem.Checked = _session.BilingualTwoColumn;
+        _bilingualMenu.Font = current is null ? _menuFontRegular : _menuFontBold;
     }
 
     /// <summary>
@@ -302,13 +538,13 @@ public sealed class KioskForm : Form
         try
         {
             File.WriteAllText(_cfg.AssignmentFile, text);
-            Console.WriteLine(text.Length > 0
-                ? $"[kiosk] Assignment context updated (saved to {_cfg.AssignmentFile}); applies to the next capture."
-                : "[kiosk] Assignment context cleared — feedback returns to general mode.");
+            KioskLog.Info(text.Length > 0
+                ? $"Assignment context updated (saved to {_cfg.AssignmentFile}); applies to the next capture."
+                : "Assignment context cleared — feedback returns to general mode.");
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[kiosk] Assignment applied for this session, but saving failed: {ex.Message}");
+            KioskLog.Warn($"Assignment applied for this session, but saving failed: {ex.Message}");
         }
     }
 
@@ -322,7 +558,7 @@ public sealed class KioskForm : Form
         lock (_stateLock) last = _lastReport;
         if (last is null)
         {
-            Console.WriteLine("[kiosk] No report to reprint yet this session.");
+            KioskLog.Info("No report to reprint yet this session.");
             return;
         }
         lock (_stateLock) _busy = true;
@@ -338,9 +574,8 @@ public sealed class KioskForm : Form
                 {
                     lock (_stateLock) _busy = false;
                     Text = TitleReady;
-                    Console.WriteLine(error is null
-                        ? "[kiosk] Reprint sent to the printer."
-                        : $"[kiosk] Reprint failed: {error}");
+                    if (error is null) KioskLog.Info("Reprint sent to the printer.");
+                    else KioskLog.Warn($"Reprint failed: {error}");
                 });
             }
             catch (ObjectDisposedException) { }
@@ -360,7 +595,7 @@ public sealed class KioskForm : Form
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[kiosk] Could not open the log folder: {ex.Message}");
+            KioskLog.Warn($"Could not open the log folder: {ex.Message}");
         }
     }
 
@@ -372,9 +607,11 @@ public sealed class KioskForm : Form
         2. Press SPACE — the preview dims while the report is generated (10–25 seconds) and printing starts by itself.
         3. Multi-page work: press N on each earlier page, then SPACE on the last one.
 
-        The menu bar tunes the feedback and every choice takes effect immediately: school level & subject, the specific grade (6-12) and response band (from "Emerging — building foundations" to "Advanced"), a Bilingual option that pairs every feedback item with a chosen home language (for multilingual learners in any subject), and "Assignment" to describe today's task.
+        The menu bar tunes the feedback and every choice takes effect immediately: school level & subject, the specific grade (6-12) and response band (from "Emerging — building foundations" to "Advanced"), a Bilingual option that pairs every feedback item with a chosen home language (for multilingual learners in any subject; choose two-column to print the languages side by side, or stacked), and "Assignment" to describe today's task.
 
-        Every report's text (never images, never names) is saved to the feedback-log folder for teacher review — see the Reports menu, which can also reprint the last report after a printer jam (or press R). If the camera cable is bumped loose, the title bar says so; reconnect it and press C.
+        The Profiles menu saves all of those settings (plus flips, enhancement, and the camera choice) under a name — e.g. one profile per class period. The checked profile loads automatically every time the kiosk opens; today's assignment always comes from assignment.txt, never from a profile.
+
+        Every report's text (never images, never names) is saved to the feedback-log folder for teacher review — see the Reports menu, which can also reprint the last report after a printer jam (or press R) and open the Activity Log (or press L): the session's history of reports, token usage, declined pages, and errors. If the camera cable is bumped loose, the title bar says so; reconnect it and press C.
 
         Off-topic or blank pages show a brief on-screen notice instead of printing. Keep student names off submitted pages (a cover strip at the station handles exceptions).
         """,
@@ -388,6 +625,7 @@ public sealed class KioskForm : Form
         V / H  — flip the image vertically / horizontally
         E      — toggle auto image enhancement (white balance + exposure)
         R      — reprint the last report (no new AI request; printer-jam recovery)
+        L      — open the Activity Log (session history: tokens, declines, errors)
         ESC    — quit the kiosk
         """,
         "Hotkeys — Writer's Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -413,28 +651,28 @@ public sealed class KioskForm : Form
             // browser prompt (first run only) never interrupts a class.
             if (_entra is not null)
             {
-                Console.WriteLine("[kiosk] Keyless Azure mode: verifying district sign-in…");
+                KioskLog.Info("Keyless Azure mode: verifying district sign-in…");
                 await _entra.GetTokenAsync();
-                Console.WriteLine("[kiosk] District sign-in OK — no API key in use.");
+                KioskLog.Info("District sign-in OK — no API key in use.");
             }
 
             _descriptors = new CaptureDevices().EnumerateDescriptors().ToArray();
             if (_descriptors.Count == 0)
                 throw new InvalidOperationException("No cameras detected. Is the document camera plugged in?");
 
-            Console.WriteLine("[kiosk] Cameras detected (press C in the kiosk window to switch):");
+            KioskLog.Info("Cameras detected (press C in the kiosk window to switch):");
             for (var i = 0; i < _descriptors.Count; i++)
-                Console.WriteLine($"[kiosk]   {i}: {_descriptors[i].Name}");
+                KioskLog.Info($"  {i}: {_descriptors[i].Name}");
 
-            _camIndex = Math.Min(_cfg.CameraIndex, _descriptors.Count - 1);
-            Console.WriteLine($"[kiosk] Opening camera {_camIndex}…");
+            _camIndex = Math.Clamp(_startupCameraIndex, 0, _descriptors.Count - 1);
+            KioskLog.Info($"Opening camera {_camIndex}…");
             await OpenCameraAsync(_camIndex);
             _watchdog.Tick += OnWatchdogTick;
             _watchdog.Start();
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[kiosk] Startup error: {ex.Message}");
+            KioskLog.Warn($"Startup error: {ex.Message}");
             MessageBox.Show(ex.Message, "Writer's Kiosk", MessageBoxButtons.OK, MessageBoxIcon.Error);
             Close();
         }
@@ -458,7 +696,7 @@ public sealed class KioskForm : Form
         _device = await descriptor.OpenAsync(characteristics, OnFrame);
         await _device.StartAsync();
         _lastFrameAt = DateTime.Now;
-        Console.WriteLine($"[kiosk] Camera streaming at {characteristics.Width}x{characteristics.Height}.");
+        KioskLog.Info($"Camera streaming at {characteristics.Width}x{characteristics.Height}.");
     }
 
     /// <summary>
@@ -473,13 +711,13 @@ public sealed class KioskForm : Form
         {
             _cameraLost = true;
             Text = "Writer's Kiosk — camera signal lost · check the cable, then press C to reconnect";
-            Console.Error.WriteLine("[kiosk] Camera signal lost — check the USB cable, then press C to reconnect.");
+            KioskLog.Warn("Camera signal lost — check the USB cable, then press C to reconnect.");
         }
         else if (!stale && _cameraLost)
         {
             _cameraLost = false;
             if (!_busy) Text = TitleReady;
-            Console.WriteLine("[kiosk] Camera signal restored.");
+            KioskLog.Info("Camera signal restored.");
         }
     }
 
@@ -498,7 +736,7 @@ public sealed class KioskForm : Form
             if (DateTime.Now - _lastFrameErrorAt > TimeSpan.FromSeconds(5))
             {
                 _lastFrameErrorAt = DateTime.Now;
-                Console.Error.WriteLine($"[kiosk] Camera frame error: {ex.Message}");
+                KioskLog.Warn($"Camera frame error: {ex.Message}");
             }
         }
     }
@@ -604,17 +842,21 @@ public sealed class KioskForm : Form
 
             case Keys.V:
                 lock (_stateLock) _flipV = !_flipV;
-                Console.WriteLine($"[kiosk] Vertical flip {(_flipV ? "on" : "off")}.");
+                KioskLog.Info($"Vertical flip {(_flipV ? "on" : "off")}.");
                 break;
 
             case Keys.H:
                 lock (_stateLock) _flipH = !_flipH;
-                Console.WriteLine($"[kiosk] Horizontal flip {(_flipH ? "on" : "off")}.");
+                KioskLog.Info($"Horizontal flip {(_flipH ? "on" : "off")}.");
                 break;
 
             case Keys.E:
                 _enhancer.Enabled = !_enhancer.Enabled;
-                Console.WriteLine($"[kiosk] Auto image enhancement {(_enhancer.Enabled ? "on" : "off")}.");
+                KioskLog.Info($"Auto image enhancement {(_enhancer.Enabled ? "on" : "off")}.");
+                break;
+
+            case Keys.L:
+                ShowActivityLog();
                 break;
 
             case Keys.C when !_busy && !_switching:
@@ -626,7 +868,7 @@ public sealed class KioskForm : Form
                     var found = new CaptureDevices().EnumerateDescriptors().ToArray();
                     if (found.Length == 0)
                     {
-                        Console.Error.WriteLine("[kiosk] No cameras detected — plug one in, then press C again.");
+                        KioskLog.Warn("No cameras detected — plug one in, then press C again.");
                     }
                     else
                     {
@@ -634,12 +876,12 @@ public sealed class KioskForm : Form
                         var next = (_camIndex + 1) % found.Length;
                         await OpenCameraAsync(next);
                         _camIndex = next;
-                        Console.WriteLine($"[kiosk] Now using camera {next}: {found[next].Name}");
+                        KioskLog.Info($"Now using camera {next}: {found[next].Name}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"[kiosk] Camera reconnect failed: {ex.Message} — press C to try again.");
+                    KioskLog.Warn($"Camera reconnect failed: {ex.Message} — press C to try again.");
                 }
                 finally { _switching = false; }
                 break;
@@ -678,19 +920,19 @@ public sealed class KioskForm : Form
     {
         if (DateTime.Now < _captureOkAt)
         {
-            Console.WriteLine($"[kiosk] One moment — page just captured. Try again in {SecondsLeft(_captureOkAt)}s.");
+            KioskLog.Info($"One moment — page just captured. Try again in {SecondsLeft(_captureOkAt)}s.");
             return;
         }
         if (_batch.Count >= MaxPages - 1)
         {
-            Console.WriteLine($"[kiosk] Page limit ({MaxPages}) nearly reached — press SPACE to capture the last page and get feedback.");
+            KioskLog.Info($"Page limit ({MaxPages}) nearly reached — press SPACE to capture the last page and get feedback.");
             return;
         }
         using var frame = SnapshotFrame();
         if (frame is null) return;
         _batch.Add(ImageOps.EncodeJpeg(frame));
         _captureOkAt = DateTime.Now.AddSeconds(1.5);
-        Console.WriteLine($"[kiosk] Page {_batch.Count} captured. Place the next page, then N again or SPACE to finish.");
+        KioskLog.Info($"Page {_batch.Count} captured. Place the next page, then N again or SPACE to finish.");
         Text = $"Writer's Kiosk — {_batch.Count} page(s) captured · SPACE: capture last page & get feedback";
     }
 
@@ -698,12 +940,12 @@ public sealed class KioskForm : Form
     {
         if (DateTime.Now < _submitOkAt)
         {
-            Console.WriteLine($"[kiosk] Cooldown — next submission in {SecondsLeft(_submitOkAt)}s (prevents accidental repeat API calls).");
+            KioskLog.Info($"Cooldown — next submission in {SecondsLeft(_submitOkAt)}s (prevents accidental repeat API calls).");
             return;
         }
         if (DateTime.Now < _captureOkAt)
         {
-            Console.WriteLine($"[kiosk] One moment — page just captured. Try again in {SecondsLeft(_captureOkAt)}s.");
+            KioskLog.Info($"One moment — page just captured. Try again in {SecondsLeft(_captureOkAt)}s.");
             return;
         }
         using var frame = SnapshotFrame();
@@ -715,7 +957,7 @@ public sealed class KioskForm : Form
         var pages = new List<byte[]>(_batch) { ImageOps.EncodeJpeg(frame) };
         _batch.Clear();
         var kb = pages.Sum(p => p.Length) / 1024;
-        Console.WriteLine($"[kiosk] Submitting {pages.Count} page(s) ({kb} KB). Requesting feedback…");
+        KioskLog.Info($"Submitting {pages.Count} page(s) ({kb} KB). Requesting feedback…");
 
         lock (_stateLock) _busy = true;
         Text = TitleBusy;
@@ -724,6 +966,7 @@ public sealed class KioskForm : Form
         {
             string[]? notice = null;
             string? error = null;
+            var safety = false;
             try
             {
                 var markdown = await LlmClient.GetFeedbackAsync(_cfg, pages, _session, _entra);
@@ -733,8 +976,9 @@ public sealed class KioskForm : Form
                     // Possible real disclosure: nothing prints, nothing is
                     // logged as feedback; the student sees the same calm
                     // notice style as any refusal, and staff are alerted
-                    // through SafetyAlert (console, safety log, and the
-                    // district flow when configured).
+                    // through SafetyAlert (activity log, safety log, and
+                    // the district flow when configured).
+                    safety = true;
                     notice =
                     [
                         "Nothing was printed.",
@@ -757,9 +1001,9 @@ public sealed class KioskForm : Form
                     {
                         var logged = FeedbackLog.Append(markdown, subject);
                         if (logged is not null)
-                            Console.WriteLine($"[kiosk] Feedback text saved to {logged} for teacher review.");
+                            KioskLog.Info($"Feedback text saved to {logged} for teacher review.");
                     }
-                    Console.WriteLine("[kiosk] Feedback received. Printing…");
+                    KioskLog.Info("Feedback received. Printing…");
                     try
                     {
                         Printing.PrintMarkdown(markdown, _cfg, subject);
@@ -791,11 +1035,22 @@ public sealed class KioskForm : Form
                     _submitOkAt = DateTime.Now.AddSeconds(_cfg.CooldownSeconds);
                     Text = TitleReady;
                     if (error is not null)
-                        Console.Error.WriteLine($"[kiosk] This capture failed: {error}\n[kiosk] Ready to try again.");
+                    {
+                        KioskLog.CountError();
+                        KioskLog.Warn($"This capture failed: {error} — ready to try again.");
+                    }
                     else if (notice is not null)
-                        Console.WriteLine($"[kiosk] Not printed: {string.Join(" ", notice)}");
+                    {
+                        // A safety notice is counted by SafetyAlert, not
+                        // as an ordinary declined submission.
+                        if (!safety) KioskLog.CountDeclined();
+                        KioskLog.Info($"Not printed: {string.Join(" ", notice)}");
+                    }
                     else
-                        Console.WriteLine("[kiosk] Report sent to the printer. Ready for the next student.");
+                    {
+                        KioskLog.CountReport();
+                        KioskLog.Info("Report sent to the printer. Ready for the next student.");
+                    }
                 });
             }
             catch (ObjectDisposedException) { }
@@ -812,6 +1067,6 @@ public sealed class KioskForm : Form
             _device = null;
             try { await device.StopAsync(); device.Dispose(); } catch { }
         }
-        Console.WriteLine("[kiosk] Goodbye.");
+        KioskLog.Info("Goodbye.");
     }
 }

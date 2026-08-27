@@ -75,13 +75,13 @@ public sealed class EntraTokenProvider
         }
         catch (AuthenticationRequiredException)
         {
-            Console.WriteLine("[kiosk] District sign-in needed — check the browser window that just opened…");
+            KioskLog.Info("District sign-in needed — check the browser window that just opened…");
             var record = await _credential.AuthenticateAsync(context);
             Directory.CreateDirectory(Path.GetDirectoryName(_recordPath)!);
             using (var stream = File.Create(_recordPath))
                 record.Serialize(stream);
             _token = await _credential.GetTokenAsync(context);
-            Console.WriteLine($"[kiosk] Signed in as {record.Username}. Future launches will be silent.");
+            KioskLog.Info($"Signed in as {record.Username}. Future launches will be silent.");
         }
         return _token.Token;
     }
