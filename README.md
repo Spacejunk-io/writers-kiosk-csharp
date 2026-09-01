@@ -172,8 +172,11 @@ installed:
 dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true
 ```
 
-The result lands in `bin\Release\net10.0-windows\win-x64\publish\` —
+The result lands in `bin\Release\net10.0-windows10.0.19041.0\win-x64\publish\` —
 copy that folder anywhere, put a filled-in `.env` beside the exe, run.
+A self-contained publish records its packages in `packages.publish.lock.json`,
+separate from the `packages.lock.json` that CI restores in locked mode; commit
+it if it changes.
 
 Optional: a few plain sentences in an `assignment.txt` next to the exe
 (template: `assignment.example.txt`) focus each day's feedback on the
@@ -235,6 +238,7 @@ warnings promoted to errors.
 | 1.5.0 | Grade 6–12 + five-band response calibration; bilingual option for multilingual learners in any subject |
 | 1.6.0 | Teacher profiles (named presets, auto-loaded at launch); two-column bilingual print layout; console window replaced by in-app Activity Log; blank-page enhancement fix; xUnit test suite + CI |
 | 1.6.1 | Install-free silent printing via Windows' built-in PDF engine (no more Acrobat fallback on machines without SumatraPDF); file-making "printers" refused with instructions instead of a save dialog; camera frames dropped instead of queued when processing lags |
+| 1.6.2 | Outbound calls refuse redirects and require https endpoints; the kiosk folder is anchored at startup (a shortcut with a blank "Start in" now finds `.env`, logs and profiles); built-in PDF engine tested and corrected to a true 300 dpi (about 4× less memory on scaled displays, printed output unchanged); CI pinned by commit, SDK and lock file; 91 tests |
 
 ## License
 
