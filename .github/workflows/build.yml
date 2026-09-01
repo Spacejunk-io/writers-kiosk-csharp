@@ -5,19 +5,29 @@ on:
     branches: [master]
   pull_request:
 
+# Read-only token: this workflow builds and tests; it publishes nothing.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned by commit, not by tag — a tag can be moved.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
+      - name: Set up .NET (the exact SDK named in global.json)
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
 
-      - name: Build (warnings are errors)
-        run: dotnet build WritersKiosk.csproj -c Release -warnaserror
+      # --locked-mode: the committed packages.lock.json files are the only
+      # packages CI may use; a drifted or substituted dependency fails here.
+      - name: Restore (locked)
+        run: dotnet restore tests/WritersKiosk.Tests/WritersKiosk.Tests.csproj --locked-mode
+
+      - name: Build (warnings are errors, app and tests alike)
+        run: dotnet build tests/WritersKiosk.Tests/WritersKiosk.Tests.csproj -c Release --no-restore -warnaserror
 
       - name: Test
-        run: dotnet test tests/WritersKiosk.Tests/WritersKiosk.Tests.csproj -c Release
+        run: dotnet test tests/WritersKiosk.Tests/WritersKiosk.Tests.csproj -c Release --no-build

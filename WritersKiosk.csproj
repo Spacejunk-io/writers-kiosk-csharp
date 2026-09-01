@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <!-- packages.lock.json is committed; CI restores in locked mode. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Declared here so the lock file covers both a plain restore (CI) and
+         the publish recipe's -r win-x64 with one consistent identifier set. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <!-- WinExe: no console window in the classroom. Everything the old
          console showed (camera list, cooldowns, token usage, declines)
          lives in the in-app Activity Log (Reports menu, or the L key). -->
