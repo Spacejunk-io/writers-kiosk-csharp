@@ -37,7 +37,10 @@ internal static class PdfRasterPrinter
     }
 
     /// <summary>Testable core: prints to caller-supplied settings (which
-    /// may target print-to-file for hardware-free verification).</summary>
+    /// may target print-to-file for hardware-free verification).
+    /// Blocks on the WinRT rasteriser, so call it from a worker thread
+    /// (both callers run inside Task.Run) — never from the UI thread,
+    /// where the wait would deadlock against the message loop.</summary>
     internal static void Print(string pdfPath, PrinterSettings settings, string? duplex)
     {
         var pages = RasterizeAsync(pdfPath).GetAwaiter().GetResult();
@@ -51,33 +54,39 @@ internal static class PdfRasterPrinter
         }
     }
 
-    private static async Task<List<Bitmap>> RasterizeAsync(string pdfPath)
+    /// <summary>Bitmap ceilings, in pixels — a malformed page can never
+    /// demand more than this.</summary>
+    private const double MaxWidth = 4400, MaxHeight = 5700;
+
+    /// <summary>One bitmap per page at <see cref="RenderDpi"/>, each
+    /// dimension clamped; the caller owns and disposes them.</summary>
+    internal static async Task<List<Bitmap>> RasterizeAsync(string pdfPath)
     {
         var file = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(pdfPath));
         var document = await PdfDocument.LoadFromFileAsync(file);
+        if (document.PageCount == 0)
+            throw new InvalidOperationException("The PDF contained no pages to print.");
+
+        // Windows.Data.Pdf multiplies the requested destination size by the
+        // display's DPI factor (150 % scaling → 1.5× the pixels asked for),
+        // whatever DPI awareness the process declares. Measure that factor
+        // once, with a small probe render, so the sizes below come out as
+        // asked instead of ballooning on a scaled display.
+        var scale = await MeasureRenderScaleAsync(document);
+
         var pages = new List<Bitmap>();
         try
         {
             for (uint i = 0; i < document.PageCount; i++)
             {
                 using var page = document.GetPage(i);
-                // Page size is in points (1/72"); clamp so a malformed
-                // page can never demand an absurd bitmap.
-                var options = new PdfPageRenderOptions
-                {
-                    DestinationWidth = (uint)Math.Clamp(page.Size.Width * RenderDpi / 72.0, 1, 4400),
-                    DestinationHeight = (uint)Math.Clamp(page.Size.Height * RenderDpi / 72.0, 1, 5700),
-                };
-                using var stream = new InMemoryRandomAccessStream();
-                await page.RenderToStreamAsync(stream, options);
-                using var netStream = stream.AsStreamForRead();
-                using var ms = new MemoryStream();
-                await netStream.CopyToAsync(ms);
-                ms.Position = 0;
-                // Copy out of the stream-backed bitmap: GDI+ requires
-                // the source stream to outlive it otherwise.
-                using var streamBacked = new Bitmap(ms);
-                pages.Add(new Bitmap(streamBacked));
+                // PdfPage.Size is in device-independent units (96 per inch),
+                // not points. Clamp the target, then undo the renderer's scaling.
+                var width = Math.Clamp(page.Size.Width * RenderDpi / 96.0, 1.0, MaxWidth);
+                var height = Math.Clamp(page.Size.Height * RenderDpi / 96.0, 1.0, MaxHeight);
+                pages.Add(await RenderAsync(page,
+                    (uint)Math.Max(1, Math.Round(width / scale)),
+                    (uint)Math.Max(1, Math.Round(height / scale))));
             }
         }
         catch
@@ -85,9 +94,33 @@ internal static class PdfRasterPrinter
             foreach (var page in pages) page.Dispose();
             throw;
         }
-        if (pages.Count == 0)
-            throw new InvalidOperationException("The PDF contained no pages to print.");
         return pages;
+    }
+
+    private const uint ProbeSize = 96;
+
+    /// <summary>Renders the first page at a known small size and returns
+    /// actual ÷ requested: 1.0 on a 100 % display, 1.5 at 150 %.</summary>
+    private static async Task<double> MeasureRenderScaleAsync(PdfDocument document)
+    {
+        using var page = document.GetPage(0);
+        using var probe = await RenderAsync(page, ProbeSize, ProbeSize);
+        return Math.Max(0.1, probe.Width / (double)ProbeSize);
+    }
+
+    private static async Task<Bitmap> RenderAsync(PdfPage page, uint width, uint height)
+    {
+        var options = new PdfPageRenderOptions { DestinationWidth = width, DestinationHeight = height };
+        using var stream = new InMemoryRandomAccessStream();
+        await page.RenderToStreamAsync(stream, options);
+        using var netStream = stream.AsStreamForRead();
+        using var ms = new MemoryStream();
+        await netStream.CopyToAsync(ms);
+        ms.Position = 0;
+        // Copy out of the stream-backed bitmap: GDI+ requires the source
+        // stream to outlive it otherwise.
+        using var streamBacked = new Bitmap(ms);
+        return new Bitmap(streamBacked);
     }
 
     private static void PrintBitmaps(List<Bitmap> pages, PrinterSettings settings, string? duplex)
