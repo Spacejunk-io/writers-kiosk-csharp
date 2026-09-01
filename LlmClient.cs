@@ -148,7 +148,33 @@ STYLE:
         return prompt;
     }
 
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(120) };
+    /// <summary>The one channel that carries student page images out of
+    /// the building. Tests may replace it; the policy lives in
+    /// <see cref="CreateHandler"/>.</summary>
+    internal static HttpClient Http { get; set; } =
+        new(CreateHandler()) { Timeout = TimeSpan.FromSeconds(120) };
+
+    /// <summary>
+    /// Outbound policy: a redirect is never followed. The request body is
+    /// the student's work, and a 307/308 would re-POST it to wherever the
+    /// redirect pointed; a 3xx is reported as a failed call instead.
+    /// </summary>
+    internal static SocketsHttpHandler CreateHandler() => new() { AllowAutoRedirect = false };
+
+    /// <summary>Best-effort message from an API error body. A proxy's
+    /// HTML page or an empty body must not mask the status code behind
+    /// a JSON parse error.</summary>
+    private static string ErrorDetail(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.TryGetProperty("error", out var err) &&
+                   err.TryGetProperty("message", out var msg)
+                ? msg.GetString() ?? "(no detail)" : "(no detail)";
+        }
+        catch (JsonException) { return "(no detail)"; }
+    }
 
     /// <summary>
     /// Sends the captured page images (JPEG bytes, in memory only) to the
@@ -238,20 +264,29 @@ STYLE:
         if (response is null)
             throw new InvalidOperationException("Could not reach the LLM API (check the internet connection)");
 
+        var status = (int)response.StatusCode;
         var json = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+
+        if (status is >= 300 and < 400)
+        {
+            // Never followed (see CreateHandler), and never silently accepted.
+            var location = response.Headers.Location?.ToString() ?? "(no Location header)";
+            throw new InvalidOperationException(
+                $"LLM API redirected ({status} to {location}) — refused, because the request " +
+                "carries student work. Check the endpoint in .env.");
+        }
 
         if (!response.IsSuccessStatusCode)
         {
-            var detail = root.TryGetProperty("error", out var err) &&
-                         err.TryGetProperty("message", out var msg)
-                ? msg.GetString() : "(no detail)";
-            var hint = cfg.AzureUseEntra && (int)response.StatusCode is 401 or 403
+            var detail = ErrorDetail(json);
+            var hint = cfg.AzureUseEntra && status is 401 or 403
                 ? " (Keyless mode: your district account may lack the \"Cognitive Services OpenAI User\" role on the Azure OpenAI resource — ask IT.)"
                 : "";
-            throw new InvalidOperationException($"LLM API error {(int)response.StatusCode}: {detail}{hint}");
+            throw new InvalidOperationException($"LLM API error {status}: {detail}{hint}");
         }
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
 
         // Surface token usage in the Activity Log so the teacher can
         // track spend (per report and as a running session total).

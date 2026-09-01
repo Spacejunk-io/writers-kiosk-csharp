@@ -23,7 +23,11 @@ namespace WritersKiosk;
 
 public static class SafetyAlert
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
+    // Same outbound policy as the model call: a redirect is never
+    // followed. The payload is metadata only, but it still goes only
+    // where IT pointed it; a 3xx surfaces below as a failed POST.
+    private static readonly HttpClient Http =
+        new(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(15) };
 
     /// <summary>
     /// Records and (if configured) forwards a possible-safety-concern

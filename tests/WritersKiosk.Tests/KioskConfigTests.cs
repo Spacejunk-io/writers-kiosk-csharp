@@ -22,7 +22,7 @@ public sealed class KioskConfigTests
     ];
 
     /// <summary>Loads a config with exactly the given variables set.</summary>
-    private static KioskConfig LoadWith(params (string Key, string Value)[] vars)
+    internal static KioskConfig LoadWith(params (string Key, string Value)[] vars)
     {
         foreach (var name in AllVars) Environment.SetEnvironmentVariable(name, null);
         foreach (var (key, value) in vars) Environment.SetEnvironmentVariable(key, value);
@@ -147,5 +147,32 @@ public sealed class KioskConfigTests
         Assert.Equal(new Point(1920, 0), both.WindowPos);
         var onlyX = LoadWith(("OPENAI_API_KEY", "sk-test"), ("WINDOW_X", "1920"));
         Assert.Null(onlyX.WindowPos);
+    }
+
+    // ── Outbound URLs: https only, no credentials ───────────────────
+
+    [Theory]
+    [InlineData("http://example.openai.azure.com")]              // cleartext
+    [InlineData("https://user:secret@example.openai.azure.com")] // credentials in the URL
+    [InlineData("https://example.openai.azure.com/?x=1")]        // the code appends its own query
+    [InlineData("example.openai.azure.com")]                     // not absolute
+    public void AzureEndpointMustBeABareHttpsUrl(string endpoint) =>
+        Assert.Throws<InvalidOperationException>(() => LoadWith(
+            ("LLM_PROVIDER", "azure"),
+            ("AZURE_OPENAI_ENDPOINT", endpoint),
+            ("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")));
+
+    [Fact]
+    public void SafetyWebhookMustBeHttpsButMayCarryItsSignatureInTheQuery()
+    {
+        // A Power Automate trigger URL puts its SAS signature in the query.
+        var flow = "https://prod-00.westus.logic.azure.com:443/workflows/abc/triggers/manual/paths/invoke" +
+                   "?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=REDACTED";
+        var cfg = LoadWith(("OPENAI_API_KEY", "sk-test"), ("SAFETY_WEBHOOK_URL", flow));
+        Assert.Equal(flow, cfg.SafetyWebhookUrl);
+
+        Assert.Throws<InvalidOperationException>(() => LoadWith(
+            ("OPENAI_API_KEY", "sk-test"),
+            ("SAFETY_WEBHOOK_URL", "http://prod-00.westus.logic.azure.com/workflows/abc")));
     }
 }

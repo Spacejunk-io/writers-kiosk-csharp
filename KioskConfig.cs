@@ -44,6 +44,26 @@ public sealed class KioskConfig
     /// <summary>Human-readable station identity used in safety alerts.</summary>
     public string StationName { get; private init; } = "";
 
+    /// <summary>
+    /// Every outbound URL the kiosk is configured with must be absolute
+    /// https with no credentials in it. The model endpoint carries student
+    /// page images and the district flow carries safety metadata; a
+    /// mistyped http:// would send either in the clear, silently.
+    /// </summary>
+    internal static string HttpsUrl(string name, string value, bool allowQuery)
+    {
+        var ok = Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+                 uri.Scheme == Uri.UriSchemeHttps &&
+                 uri.UserInfo.Length == 0 &&
+                 uri.Fragment.Length == 0 &&
+                 (allowQuery || uri.Query.Length == 0);
+        if (!ok)
+            throw new InvalidOperationException(
+                $"{name} must be an absolute https:// URL with no credentials" +
+                (allowQuery ? "" : " or query string") + $", got \"{value}\".");
+        return value;
+    }
+
     public static KioskConfig Load()
     {
         // Missing .env is fine — variables may be set at the OS level.
@@ -106,7 +126,9 @@ public sealed class KioskConfig
             Provider = provider,
             ApiKey = provider == Provider.OpenAi ? Require("OPENAI_API_KEY") : azureKey,
             Model = Get("OPENAI_MODEL", "gpt-4o"),
-            AzureEndpoint = provider == Provider.Azure ? Require("AZURE_OPENAI_ENDPOINT").TrimEnd('/') : "",
+            AzureEndpoint = provider == Provider.Azure
+                ? HttpsUrl("AZURE_OPENAI_ENDPOINT", Require("AZURE_OPENAI_ENDPOINT"), allowQuery: false).TrimEnd('/')
+                : "",
             AzureDeployment = provider == Provider.Azure ? Require("AZURE_OPENAI_DEPLOYMENT") : "",
             AzureApiVersion = Get("AZURE_OPENAI_API_VERSION", "2024-06-01"),
             AzureUseEntra = azureUseEntra,
@@ -129,7 +151,11 @@ public sealed class KioskConfig
             Enhance = Get("ENHANCE").ToLowerInvariant() is not ("0" or "false" or "off" or "no"),
             CooldownSeconds = int.TryParse(Get("COOLDOWN_SECONDS"), out var cd) ? cd : 8,
             FeedbackLogEnabled = Get("FEEDBACK_LOG").ToLowerInvariant() is not ("0" or "false" or "off" or "no"),
-            SafetyWebhookUrl = Get("SAFETY_WEBHOOK_URL") is { Length: > 0 } wh ? wh : null,
+            // A Power Automate trigger URL carries its SAS signature in the
+            // query string, so the query is allowed here and only here.
+            SafetyWebhookUrl = Get("SAFETY_WEBHOOK_URL") is { Length: > 0 } wh
+                ? HttpsUrl("SAFETY_WEBHOOK_URL", wh, allowQuery: true)
+                : null,
             StationName = Get("STATION_NAME", Environment.MachineName),
         };
     }
