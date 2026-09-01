@@ -6,6 +6,10 @@
     <!-- Declared here so the lock file covers both a plain restore (CI) and
          the publish recipe's -r win-x64 with one consistent identifier set. -->
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <!-- A self-contained publish restores runtime packs and the implicit ILLink
+         tasks that a plain restore does not, so it keeps its own lock file
+         rather than rewriting the one CI restores in locked mode. -->
+    <NuGetLockFilePath Condition="'$(SelfContained)' == 'true'">packages.publish.lock.json</NuGetLockFilePath>
     <!-- WinExe: no console window in the classroom. Everything the old
          console showed (camera list, cooldowns, token usage, declines)
          lives in the in-app Activity Log (Reports menu, or the L key). -->
